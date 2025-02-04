@@ -1,6 +1,8 @@
 # ComfyUI RollingArtist
 
 **RollingArtist** 是一个 ComfyUI 节点，用于生成包含随机权重的艺术家提示文本，适配文本到图像生成模型。节点从 CSV 文件中读取艺术家列表，并根据参数生成组合提示。
+![RollingArtist](https://github.com/user-attachments/assets/486388c7-4a7c-418c-8429-f554b56446db)
+
 
 ## 概述
 
