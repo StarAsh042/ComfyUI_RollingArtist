@@ -1,36 +1,54 @@
 # ComfyUI RollingArtist
 
-**RollingArtist** 是一个 ComfyUI 节点，用于生成包含随机权重的艺术家提示文本，适配文本到图像生成模型。节点从 CSV 文件中读取艺术家列表，并根据参数生成组合提示。
-![RollingArtist](https://github.com/user-attachments/assets/486388c7-4a7c-418c-8429-f554b56446db)
+**RollingArtist** 是一个 ComfyUI 节点，用于生成包含随机权重的艺术家提示文本。通过动态调整 Top 艺术家比例，实现可控的随机组合。
 
+![节点界面示例](https://github.com/user-attachments/assets/486388c7-4a7c-418c-8429-f554b56446db)
 
-## 概述
+## 核心功能
 
-- **功能**：根据设定的艺术家数量、权重范围及统一的种子，随机生成格式化的提示字符串。
-- **数据源**：使用 `danbooru_art_001.csv` 作为艺术家数据源。若 CSV 格式存在问题，可运行附带的 `modify_danbooru_csv.py` 进行预处理。
+- **动态 Top 控制**：通过 `artist_top_ratio` 参数定义前 X% 艺术家为 Top 级
+- **权重分配**：精确控制每个艺术家的权重范围和总和
+- **种子控制**：统一随机种子确保结果可复现
+- **线程安全**：支持多线程环境下的稳定运行
 
-## 安装
+## 安装指南
 
-1. 将本仓库克隆到 ComfyUI 的 `custom_nodes` 目录下：
+1. 克隆仓库到 ComfyUI 的 `custom_nodes` 目录：
    ```bash
    git clone https://github.com/StarAsh042/ComfyUI_RollingArtist.git
    ```
-2. 确保 `danbooru_art_001.csv` 文件与节点代码在同一目录内。
+2. 确保以下文件存在：
+   - `RollingArtist.py`（主节点文件）
+   - `danbooru_art_001.csv`（艺术家数据源）
+   - `modify_danbooru_csv.py`（可选预处理工具）
 
-## 使用方法
+## 参数说明
 
-1. 在 ComfyUI 工作流中添加 "RollingArtist" 节点。
-2. 配置主要参数：
-   - **artist_count**：选择生成的艺术家数量。
-   - **artists_prefix**：是否为艺术家名称添加前缀。
-   - **weight_min / weight_max / weight_total**：定义各艺术家的权重范围和总权重。
-   - **seed**：统一的随机种子，确保生成结果可重复。
-3. 将节点输出的提示文本连接至文本到图像生成模型进行使用。
+| 参数名称           | 类型    | 范围         | 说明                          |
+|--------------------|---------|--------------|-------------------------------|
+| artist_top_count   | INT     | 1-10         | 生成的艺术家人数              |
+| artist_top_ratio   | FLOAT   | 0.1-1.0      | 定义前 X% 艺术家为 Top 级     |
+| artists_prefix     | BOOLEAN | -            | 添加 "artist:" 前缀           |
+| weight_min         | FLOAT   | 0.1-1.0      | 单个艺术家最小权重            |
+| weight_max         | FLOAT   | 0.5-2.0      | 单个艺术家最大权重            |
+| weight_total       | FLOAT   | 1.0-20.0     | 所有权重总和                  |
+| seed               | INT     | 0-4294967295 | 控制随机性的种子值            |
 
-## 附加工具
+## 使用示例
 
-- 如遇 CSV 格式问题，可运行 `modify_danbooru_csv.py` 脚本对 CSV 文件进行预处理。
+典型工作流配置：
+1. 添加 **RollingArtist** 节点
+2. 连接至文本编码器
+3. 输出示例：
+   ```
+   (artist:John_Doe:0.5),(artist:Jane_Smith:1.2),...
+   ```
+
+## 数据预处理
+当 CSV 文件出现格式问题时，运行：
+```bash
+python modify_danbooru_csv.py
+```
 
 ## 许可证
-
-本项目采用 [GNU Affero General Public License v3](https://www.gnu.org/licenses/agpl-3.0.html) 许可协议。详情请参阅 [LICENSE](./LICENSE) 文件。
+[GNU Affero General Public License v3](LICENSE)
