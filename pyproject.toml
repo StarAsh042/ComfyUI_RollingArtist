@@ -1,7 +1,7 @@
 [project]
 name = "comfyui_rollingartist"
 description = "RollingArtist is a ComfyUI node designed to generate artist prompt texts with random weights, suitable for text-to-image generation models. The node reads an artist list from a CSV file and generates combined prompts based on the parameters."
-version = "1.0.0"
+version = "2.0.0"
 license = {file = "LICENSE"}
 dependencies = []
 
