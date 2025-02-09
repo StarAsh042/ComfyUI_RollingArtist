@@ -9,13 +9,21 @@ class RollingArtist:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "artist_top_count": ("INT", {
+                "artist_count": ("INT", {
                     "default": 5,
                     "min": 1,
                     "max": 10,
                     "step": 1,
-                    "display": "number",
+                    "display": "slider",
                     "description": "选择生成的艺术家人数（1-10）"
+                }),
+                "artist_top_count": ("INT", {
+                    "default": 3,
+                    "min": 1,
+                    "max": 10,
+                    "step": 1,
+                    "display": "slider",
+                    "description": "输出中包含的Top艺术家数量（至少1个）"
                 }),
                 "artist_top_ratio": ("FLOAT", {
                     "default": 0.2,
@@ -23,7 +31,7 @@ class RollingArtist:
                     "max": 1.0,
                     "step": 0.1,
                     "display": "slider",
-                    "description": "定义前X%艺术家为Top级（0.1-1.0）"
+                    "description": "提取CSV中Top艺术家占前百分比,已知CSV越靠前艺术家作品越多"
                 }),
                 "artists_prefix": ("BOOLEAN", {
                     "default": True,
@@ -34,6 +42,7 @@ class RollingArtist:
                     "min": 0.1,
                     "max": 1.0,
                     "step": 0.1,
+                    "display": "slider",
                     "description": "单个艺术家最小权重值"
                 }),
                 "weight_max": ("FLOAT", {
@@ -41,6 +50,7 @@ class RollingArtist:
                     "min": 0.5,
                     "max": 2.0,
                     "step": 0.1,
+                    "display": "slider",
                     "description": "单个艺术家最大权重值"
                 }),
                 "weight_total": ("FLOAT", {
@@ -48,6 +58,7 @@ class RollingArtist:
                     "min": 1.0,
                     "max": 20.0,
                     "step": 1.0,
+                    "display": "slider",
                     "description": "所有权重值的总和"
                 }),
                 "seed": ("INT", {
@@ -68,9 +79,9 @@ class RollingArtist:
     def __init__(self):
         self.artists = self.load_artists()
         self.lock = threading.Lock()
-        self.top_artists = set()
-        self.non_top_artists = []
-        self.update_top_artists(0.2)  # 默认初始化
+        self.top_pool = []
+        self.non_top_pool = []
+        self.update_top_pool(0.2)
 
     def load_artists(self) -> List[str]:
         """加载固定的CSV文件"""
@@ -86,14 +97,18 @@ class RollingArtist:
             print(f"[RollingArtist] CSV加载失败: {str(e)}")
             return []
 
-    def update_top_artists(self, ratio: float):
-        """根据比例更新Top艺术家列表"""
+    def update_top_pool(self, top_ratio: float):
+        """根据比例更新Top艺术家池"""
         if not self.artists:
             return
             
-        top_n = max(1, int(len(self.artists) * ratio))
-        self.top_artists = set(self.artists[:top_n])
-        self.non_top_artists = [a for a in self.artists if a not in self.top_artists]
+        # 确保计算结果为整数
+        top_count = int(len(self.artists) * top_ratio)
+        # 至少保留1个艺术家
+        top_count = max(1, top_count)
+        
+        self.top_pool = self.artists[:top_count]
+        self.non_top_pool = [a for a in self.artists if a not in self.top_pool]
 
     def generate_fixed_weights(self, count: int, weight_min: float, 
                               weight_max: float, weight_total: float, 
@@ -136,14 +151,14 @@ class RollingArtist:
 
     def _adjust_top(self, artists: List[str], rng: random.Random) -> List[str]:
         """调整Top艺术家数量"""
-        top_count = sum(1 for a in artists if a in self.top_artists)
+        top_count = sum(1 for a in artists if a in self.top_pool)
         if top_count <= 3:
             return artists
             
         # 替换多余的Top艺术家
-        replace_indices = [i for i, a in enumerate(artists) if a in self.top_artists]
+        replace_indices = [i for i, a in enumerate(artists) if a in self.top_pool]
         rng.shuffle(replace_indices)
-        candidates = list(set(self.non_top_artists) - set(artists))
+        candidates = list(set(self.non_top_pool) - set(artists))
         
         for idx in replace_indices[:top_count-3]:
             if not candidates:
@@ -153,27 +168,35 @@ class RollingArtist:
             
         return artists
 
-    def generate_artists(self, artist_top_count: int, artist_top_ratio: float,
-                        artists_prefix: bool, weight_min: float,
-                        weight_max: float, weight_total: float, seed: int):
+    def generate_artists(self, artist_count: int, artist_top_count: int,
+                        artist_top_ratio: float, artists_prefix: bool,
+                        weight_min: float, weight_max: float,
+                        weight_total: float, seed: int):
         """主生成函数"""
         with self.lock:
-            # 参数校验
-            if artist_top_count < 1 or not self.artists:
+            if artist_count < 1 or not self.artists:
                 return ("",)
                 
-            # 更新Top艺术家配置
-            self.update_top_artists(artist_top_ratio)
+            # 更新Top艺术家池（根据CSV前百分比）
+            self.update_top_pool(artist_top_ratio)
             
-            # 初始化随机生成器
+            # 计算实际要输出的Top数量（直接使用输入值）
+            actual_top = max(1, min(
+                artist_top_count, 
+                artist_count, 
+                len(self.top_pool)
+            ))
+            
+            # 生成艺术家列表
             rng = random.Random(seed)
             
-            # 生成基础列表
-            count = min(artist_top_count, len(self.artists))
-            base_order = self._get_random_order(count, rng)
+            # 确保至少选择1个Top艺术家
+            selected_top = rng.sample(self.top_pool, min(actual_top, len(self.top_pool)))
+            remaining = max(0, artist_count - len(selected_top))
+            selected_non_top = rng.sample(self.non_top_pool, min(remaining, len(self.non_top_pool)))
             
-            # 调整Top艺术家
-            final_order = self._adjust_top(base_order.copy(), rng)
+            final_order = selected_top + selected_non_top
+            rng.shuffle(final_order)
             
             # 生成权重
             weights = self.generate_fixed_weights(

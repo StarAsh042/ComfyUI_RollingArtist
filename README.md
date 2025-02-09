@@ -6,7 +6,7 @@
 
 ## 核心功能
 
-- **动态 Top 控制**：通过 `artist_top_ratio` 参数定义前 X% 艺术家为 Top 级
+- **动态控制**：定义Top艺术家范围，控制实际输出数量
 - **权重分配**：精确控制每个艺术家的权重范围和总和
 - **种子控制**：统一随机种子确保结果可复现
 - **线程安全**：支持多线程环境下的稳定运行
@@ -26,9 +26,10 @@
 
 | 参数名称           | 类型    | 范围         | 说明                          |
 |--------------------|---------|--------------|-------------------------------|
-| artist_top_count   | INT     | 1-10         | 生成的艺术家人数              |
-| artist_top_ratio   | FLOAT   | 0.1-1.0      | 定义前 X% 艺术家为 Top 级     |
-| artists_prefix     | BOOLEAN | -            | 添加 "artist:" 前缀           |
+| artist_count       | INT     | 1-10         | 选择生成的艺术家人数          |
+| artist_top_count   | INT     | 1-10         | 输出中包含的Top艺术家数量     |
+| artist_top_ratio   | FLOAT   | 0.1-1.0      | 提取CSV中Top艺术家占前百分比  |
+| artists_prefix     | BOOLEAN | -            | 添加"artist:"前缀             |
 | weight_min         | FLOAT   | 0.1-1.0      | 单个艺术家最小权重            |
 | weight_max         | FLOAT   | 0.5-2.0      | 单个艺术家最大权重            |
 | weight_total       | FLOAT   | 1.0-20.0     | 所有权重总和                  |
