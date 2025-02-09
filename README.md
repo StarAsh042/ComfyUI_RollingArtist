@@ -2,7 +2,7 @@
 
 **RollingArtist** 是一个 ComfyUI 节点，用于生成包含随机权重的艺术家提示文本。通过动态调整 Top 艺术家比例，实现可控的随机组合。
 
-![节点界面示例](https://github.com/user-attachments/assets/e6590c66-8050-4dfd-8416-489a8ec4e429)
+![ComfyUI_RollingArtist](https://github.com/user-attachments/assets/157de400-e4e9-479b-ac8e-8698d2661112)
 
 
 ## 核心功能
