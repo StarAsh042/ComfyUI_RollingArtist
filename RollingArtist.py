@@ -159,7 +159,7 @@ class RollingArtist:
         
         该方法确保生成的权重列表满足以下条件:
         1. 每个权重值在weight_min和weight_max之间
-        2. 所有权重的总和等于weight_total(在有效范围内)
+        2. 所有权重的总和精确等于weight_total(在有效范围内)
         3. 权重分配具有随机性
         
         参数:
@@ -177,12 +177,13 @@ class RollingArtist:
         lower_bound = n * weight_min  # 最小可能的权重总和
         upper_bound = n * weight_max  # 最大可能的权重总和
         weight_total = max(lower_bound, min(weight_total, upper_bound))  # 调整权重总和到有效范围
+        weight_total = round(weight_total, 1)  # 确保权重总和保留一位小数
         
         # 初始化所有权重为最小值
         weights = [weight_min] * n
         
         # 计算剩余可分配的权重总和
-        remaining = round(weight_total - lower_bound, 1)
+        remaining = round(weight_total - sum(weights), 1)
         
         # 创建索引列表并随机打乱，确保随机分配
         indices = list(range(n))
@@ -190,15 +191,48 @@ class RollingArtist:
         
         # 单次循环分配剩余权重
         for i in indices:
-            # 计算当前权重可以增加的最大值
-            max_add = min(weight_max - weight_min, remaining)
-            if max_add <= 0:
-                break  # 没有剩余权重可分配
-                
-            # 随机分配一个增量值
-            addition = round(rng.uniform(0, max_add), 1)  # 随机增加的权重，保留一位小数
+            if i == indices[-1]:  # 最后一个元素
+                # 为最后一个元素分配所有剩余权重，确保总和精确匹配
+                addition = remaining
+                # 确保不超过最大权重限制
+                if weights[i] + addition > weight_max:
+                    addition = weight_max - weights[i]
+                    # 如果最后一个元素无法容纳所有剩余权重，尝试分配给其他元素
+                    extra = remaining - addition
+                    if extra > 0:
+                        for j in range(n):
+                            if j != i and weights[j] < weight_max:
+                                add_to_j = min(weight_max - weights[j], extra)
+                                weights[j] += add_to_j
+                                extra -= add_to_j
+                                if extra <= 0:
+                                    break
+            else:
+                # 计算当前权重可以增加的最大值
+                max_add = min(weight_max - weights[i], remaining * 0.8)  # 留出20%给后续元素
+                if max_add <= 0:
+                    continue  # 没有剩余权重可分配
+                    
+                # 随机分配一个增量值
+                addition = round(rng.uniform(0, max_add), 1)  # 随机增加的权重，保留一位小数
+            
             weights[i] += addition
             remaining = round(remaining - addition, 1)  # 更新剩余可分配权重
+            
+            if remaining <= 0:
+                break
+        
+        # 最终检查，确保权重总和精确等于目标值
+        actual_total = round(sum(weights), 1)
+        if actual_total != weight_total and n > 0:
+            # 找到可以调整的元素
+            for i in range(n):
+                if actual_total < weight_total and weights[i] < weight_max:
+                    weights[i] = round(weights[i] + (weight_total - actual_total), 1)
+                    break
+                elif actual_total > weight_total and weights[i] > weight_min:
+                    weights[i] = round(weights[i] - (actual_total - weight_total), 1)
+                    break
         
         # 返回最终权重列表，确保每个值保留一位小数
         return [round(w, 1) for w in weights]
