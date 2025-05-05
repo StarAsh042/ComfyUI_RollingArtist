@@ -40,14 +40,14 @@ class RollingArtist:
                 "weight_min": ("FLOAT", {
                     "default": 0.2,
                     "min": 0.1,
-                    "max": 1.0,
+                    "max": 2.0,
                     "step": 0.1,
                     "display": "slider",
                     "description": "单个艺术家最小权重值"
                 }),
                 "weight_max": ("FLOAT", {
                     "default": 1.0,
-                    "min": 0.5,
+                    "min": 0.1,
                     "max": 2.0,
                     "step": 0.1,
                     "display": "slider",
@@ -55,9 +55,9 @@ class RollingArtist:
                 }),
                 "weight_total": ("FLOAT", {
                     "default": 3.0,
-                    "min": 1.0,
+                    "min": 0.0,
                     "max": 20.0,
-                    "step": 1.0,
+                    "step": 0.5,
                     "display": "slider",
                     "description": "所有权重值的总和"
                 }),
