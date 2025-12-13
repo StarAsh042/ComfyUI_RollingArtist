@@ -1,15 +1,19 @@
 [project]
 name = "comfyui_rollingartist"
 description = "RollingArtist is a ComfyUI node designed to generate artist prompt texts with random weights, suitable for text-to-image generation models. The node reads an artist list from a CSV file and generates combined prompts based on the parameters."
-version = "2.0.0"
+version = "3.0.0"
 license = {file = "LICENSE"}
-dependencies = []
+requires-python = ">=3.8"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [project.urls]
 Repository = "https://github.com/StarAsh042/ComfyUI_RollingArtist"
-#  Used by Comfy Registry https://comfyregistry.org
+Documentation = "https://github.com/StarAsh042/ComfyUI_RollingArtist#readme"
 
 [tool.comfy]
-PublisherId = "starash042"
+PublisherId = "StarAsh042"
 DisplayName = "ComfyUI_RollingArtist"
 Icon = ""

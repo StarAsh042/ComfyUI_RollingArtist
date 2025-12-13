@@ -2,6 +2,7 @@ import os
 import random
 import csv
 import threading
+import json
 from typing import List, Tuple, Optional, Dict, Any, Union
 
 class RollingArtist:
@@ -30,7 +31,7 @@ class RollingArtist:
         return {
             "required": {
                 "artist_count": ("INT", {
-                    "default": 5,
+                    "default": 3,
                     "min": 1,
                     "max": 10,
                     "step": 1,
@@ -38,7 +39,7 @@ class RollingArtist:
                     "description": "选择生成的艺术家人数（1-10）"
                 }),
                 "artist_top_count": ("INT", {
-                    "default": 3,
+                    "default": 1,
                     "min": 1,
                     "max": 10,
                     "step": 1,
@@ -46,10 +47,10 @@ class RollingArtist:
                     "description": "输出中包含的Top艺术家数量（至少1个）"
                 }),
                 "artist_top_ratio": ("FLOAT", {
-                    "default": 0.2,
-                    "min": 0.1,
+                    "default": 0.01,
+                    "min": 0.01,
                     "max": 1.0,
-                    "step": 0.1,
+                    "step": 0.01,
                     "display": "slider",
                     "description": "提取CSV中Top艺术家占前百分比,已知CSV越靠前艺术家作品越多"
                 }),
@@ -74,7 +75,7 @@ class RollingArtist:
                     "description": "单个艺术家最大权重值"
                 }),
                 "weight_total": ("FLOAT", {
-                    "default": 3.0,
+                    "default": 2.0,
                     "min": 0.0,
                     "max": 20.0,
                     "step": 0.5,
@@ -87,12 +88,26 @@ class RollingArtist:
                     "max": 4294967295,
                     "description": "控制随机性的种子值"
                 }),
+            },
+            "optional": {
+                "custom_csv_path": ("STRING", {
+                    "default": "",
+                    "description": "自定义CSV路径，留空使用默认"
+                }),
+                "exclude_artists": ("STRING", {
+                    "default": "",
+                    "description": "排除的艺术家，逗号分隔"
+                }),
+                "sort_by_weight": ("BOOLEAN", {
+                    "default": True,
+                    "description": "是否按权重从高到低排序"
+                }),
             }
         }
 
     # 定义节点的输出类型和名称
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("prompt",)
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("prompt", "artists_json")
     FUNCTION = "generate_artists"  # 指定节点的主函数
     CATEGORY = "RollingArtist"    # 节点分类
     OUTPUT_NODE = True            # 标记为输出节点
@@ -112,19 +127,32 @@ class RollingArtist:
         self.non_top_pool: List[str] = []  # 初始化非Top艺术家池
         self.update_top_pool(0.2)          # 使用默认比例更新艺术家池
 
-    def load_artists(self) -> List[str]:
+    def load_artists(self, csv_path: Optional[str] = None) -> List[str]:
         """
         从CSV文件加载艺术家列表
         
         返回:
             艺术家名称列表，如果加载失败则返回空列表
         """
-        csv_path = os.path.join(os.path.dirname(__file__), "danbooru_art_001.csv")
+        csv_path = csv_path or os.path.join(os.path.dirname(__file__), "danbooru_art_001.csv")
         try:
-            with open(csv_path, "r", encoding="utf-8") as f:
+            try:
+                mtime = os.path.getmtime(csv_path)
+            except Exception:
+                mtime = None
+            if getattr(self, "_last_csv_path", None) == csv_path and getattr(self, "_last_csv_mtime", None) == mtime and getattr(self, "artists", None):
+                return self.artists
+            with open(csv_path, "r", encoding="utf-8", newline="") as f:
                 reader = csv.reader(f)
-                # 从CSV中提取所有非空艺术家名称
-                return [artist for row in reader for artist in row if artist]
+                result: List[str] = []
+                for row in reader:
+                    for artist in row:
+                        if artist:
+                            result.append(artist)
+                self.artists = result
+                self._last_csv_path = csv_path
+                self._last_csv_mtime = mtime
+                return result
         except FileNotFoundError:
             print(f"[RollingArtist] CSV文件未找到: {csv_path}")
             return []
@@ -147,9 +175,14 @@ class RollingArtist:
         # 至少保留1个艺术家
         top_count = max(1, top_count)
         
-        # 更新艺术家池
-        self.top_pool = self.artists[:top_count]  # 取CSV前部分作为Top艺术家
-        self.non_top_pool = [a for a in self.artists if a not in self.top_pool]  # 剩余部分作为非Top艺术家
+        # 若比例未变且艺术家列表未变，跳过重算
+        if getattr(self, "_last_top_ratio", None) == top_ratio and getattr(self, "_last_artists_id", None) == id(self.artists) and self.top_pool and self.non_top_pool:
+            return
+        self.top_pool = self.artists[:top_count]
+        top_set = set(self.top_pool)
+        self.non_top_pool = [a for a in self.artists if a not in top_set]
+        self._last_top_ratio = top_ratio
+        self._last_artists_id = id(self.artists)
 
     def generate_fixed_weights(self, count: int, weight_min: float, 
                               weight_max: float, weight_total: float, 
@@ -240,7 +273,9 @@ class RollingArtist:
     def generate_artists(self, artist_count: int, artist_top_count: int,
                         artist_top_ratio: float, artists_prefix: bool,
                         weight_min: float, weight_max: float,
-                        weight_total: float, seed: int) -> Tuple[str]:
+                        weight_total: float, seed: int,
+                        custom_csv_path: str = "", exclude_artists: str = "",
+                        sort_by_weight: bool = True) -> Tuple[str, str]:
         """
         主生成函数，根据参数生成艺术家提示词
         
@@ -263,12 +298,21 @@ class RollingArtist:
         返回:
             包含生成的提示词字符串的元组
         """
-        with self.lock:  # 使用线程锁确保线程安全
+        # 读取CSV不加锁，避免阻塞；仅在赋值时加锁
+        if custom_csv_path:
+            new_artists = self.load_artists(custom_csv_path)
+            with self.lock:
+                self.artists = new_artists
+        with self.lock:
             if artist_count < 1 or not self.artists:
-                return ("",)  # 无效参数或无艺术家数据时返回空字符串
+                return ("", "")
                 
             # 更新Top艺术家池（根据CSV前百分比）
             self.update_top_pool(artist_top_ratio)
+
+            exclude_set = set([a.strip() for a in exclude_artists.split(",") if a.strip()])
+            available_top_pool = [a for a in self.top_pool if a not in exclude_set]
+            available_non_top_pool = [a for a in self.non_top_pool if a not in exclude_set]
             
             # 计算实际要输出的Top数量（直接使用输入值）
             actual_top = max(1, min(
@@ -281,11 +325,11 @@ class RollingArtist:
             rng = random.Random(seed)
             
             # 确保至少选择1个Top艺术家
-            selected_top = rng.sample(self.top_pool, min(actual_top, len(self.top_pool)))
+            selected_top = rng.sample(available_top_pool, min(actual_top, len(available_top_pool)))
             # 计算剩余需要的艺术家数量
             remaining = max(0, artist_count - len(selected_top))
             # 从非Top池中选择剩余数量的艺术家
-            selected_non_top = rng.sample(self.non_top_pool, min(remaining, len(self.non_top_pool)))
+            selected_non_top = rng.sample(available_non_top_pool, min(remaining, len(available_non_top_pool)))
             
             # 合并并随机打乱最终的艺术家列表
             final_order = selected_top + selected_non_top
@@ -295,16 +339,32 @@ class RollingArtist:
             weights = self.generate_fixed_weights(
                 len(final_order), weight_min, weight_max, weight_total, rng
             )
+
+            if sort_by_weight and final_order:
+                pairs = list(zip(final_order, weights))
+                pairs.sort(key=lambda x: x[1], reverse=True)
+                final_order, weights = [p[0] for p in pairs], [p[1] for p in pairs]
             
             # 构建prompt
             prefix = "artist:" if artists_prefix else ""
             prompt_parts = [
-                f"({prefix}{artist}:{weight})" 
+                (f"{prefix}{artist}" if weight == 1.0 else f"({prefix}{artist}:{weight})")
                 for artist, weight in zip(final_order, weights)
             ]
             
-            # 返回以逗号连接的最终提示词
-            return (",".join(prompt_parts),)
+            prompt = ",".join(prompt_parts)
+            top_set = set(self.top_pool)
+            data = {
+                "artists": [
+                    {
+                        "name": artist,
+                        "weight": weight,
+                        "top": artist in top_set,
+                    }
+                    for artist, weight in zip(final_order, weights)
+                ]
+            }
+            return (prompt, json.dumps(data, ensure_ascii=False))
 
 # 注册节点类
 NODE_CLASS_MAPPINGS = {"RollingArtist": RollingArtist}
