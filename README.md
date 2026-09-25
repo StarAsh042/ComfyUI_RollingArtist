@@ -92,4 +92,4 @@ python modify_danbooru_csv.py
 ```
 
 ## 许可证
-[GNU Affero General Public License v3](LICENSE)
+[MIT License](LICENSE)
