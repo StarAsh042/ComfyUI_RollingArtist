@@ -14,6 +14,6 @@ Repository = "https://github.com/StarAsh042/ComfyUI_RollingArtist"
 Documentation = "https://github.com/StarAsh042/ComfyUI_RollingArtist#readme"
 
 [tool.comfy]
-PublisherId = "StarAsh042"
+PublisherId = "starash042"
 DisplayName = "ComfyUI_RollingArtist"
 Icon = ""
