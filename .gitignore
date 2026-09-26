@@ -1,2 +1,6 @@
-__pycache__/
-ra_core/__pycache__/
+# 忽略所有 .pyc 文件
+*.pyc
+
+# 节点运行期生成的文件，不应进入版本库与发布包
+*.bak
+*.tmp
