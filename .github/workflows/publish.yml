@@ -12,8 +12,9 @@ on:
     paths:
       - "pyproject.toml"
 
+# 最小权限：checkout 与发布只需要读取仓库内容
 permissions:
-  issues: write
+  contents: read
 
 jobs:
   publish-node:
@@ -25,7 +26,10 @@ jobs:
         # @v7 使用 Node 24 运行时（@v4 仍为 Node 20，已被 GitHub 弃用）
         uses: actions/checkout@v7
       - name: Publish Custom Node
-        uses: Comfy-Org/publish-node-action@1.0.1
+        # 官方文档推荐 @main（该 action 的 tag 只有 1.0.0/1.0.1，已落后于 main）
+        uses: Comfy-Org/publish-node-action@main
         with:
           ## 在仓库 Settings -> Secrets and variables -> Actions 中配置该 Secret
           personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+          ## 上一步已完成 checkout，跳过该 action 内部重复的 actions/checkout@v4（Node 20）
+          skip_checkout: "true"
