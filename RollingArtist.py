@@ -1,33 +1,102 @@
-import os
-import random
-import csv
-import threading
+"""ComfyUI RollingArtist 节点。
+
+从艺术家 CSV 中随机抽取艺术家并分配随机权重，生成可直接使用的提示词，
+同时输出结构化 JSON（艺术家 / 权重 / 是否 Top / 状态）。
+
+核心逻辑已拆分到 ``ra_core`` 子包，本文件仅保留：
+- 节点接口定义（INPUT_TYPES / RETURN_TYPES 等）
+- 单次生成的编排（参数规范化、锁与记录、输出组装）
+"""
+
 import json
-from typing import List, Tuple, Optional, Dict, Any, Union
+import random
+import threading
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from .ra_core.artists import (
+    ArtistRepository,
+    compute_top_count,
+    get_artist_repository,
+    select_artists,
+    split_names,
+)
+from .ra_core.constants import (
+    DEFAULT_TESTED_CSV,
+    EXACT_COMBOS_WARN,
+    LOGGER,
+    WEIGHT_STEP,
+)
+from .ra_core.exact import remaining_path_for, take_exact
+from .ra_core.storage import TestedStore, get_tested_store
+from .ra_core.weights import (
+    build_prompt,
+    dedup_key,
+    generate_weights,
+    normalize_dedup_mode,
+    weight_grid,
+)
+
+# 兼容旧版本从本模块导入常量的用法
+__all__ = [
+    "RollingArtist",
+    "NODE_CLASS_MAPPINGS",
+    "NODE_DISPLAY_NAME_MAPPINGS",
+    "WEIGHT_STEP",
+    "EXACT_COMBOS_WARN",
+]
+
+_STATUS_OK = "OK"
+_STATUS_ALL_TESTED = "ALL_COMBINATIONS_TESTED"
+
+
+def _text(value: Any) -> str:
+    """把可能为 None 的字符串输入安全地转成 str。"""
+    return "" if value is None else str(value)
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in ("", "false", "0", "no", "off")
+    return bool(value)
+
 
 class RollingArtist:
+    """RollingArtist 节点类。
+
+    功能特性：
+    - 支持从 CSV 加载艺术家列表，自动识别表头与列，可自定义路径
+    - 支持 Top 艺术家优先池、排除名单、强制包含名单
+    - 权重范围与总和双约束（步长 0.1，总和精确且不会越界）
+    - 支持 4 种去重模式，以及 artist_count=1 时的 Exact 穷举模式
+    - 结构化输出 artists_json，便于下游处理
+
+    线程安全：
+    - 艺术家 CSV 解析结果按文件签名缓存，多个实例共享
+    - 同一 ``tested_csv_path`` 上的去重记录与 Exact 组合池在进程内共享并加锁，
+      “读取已测 -> 生成 -> 记录”整段处于同一把可重入锁内，避免重复组合
     """
-    RollingArtist 节点类
-    
-    该类用于在ComfyUI中生成随机艺术家组合的提示词，支持从CSV文件中加载艺术家列表，
-    并根据配置生成带有权重的艺术家提示词字符串。
-    
-    特性:
-    - 支持从CSV文件加载艺术家列表
-    - 可配置生成的艺术家数量和权重
-    - 支持Top艺术家优先选择机制
-    - 线程安全的生成过程
-    - 可自定义权重分配算法
-    """
-    
+
     @classmethod
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, Any]]:
-        """
-        定义节点的输入参数类型和界面显示
-        
-        返回:
-            包含所有输入参数配置的字典
-        """
+        """定义节点的输入参数类型和界面显示。"""
         return {
             "required": {
                 "artist_count": ("INT", {
@@ -36,7 +105,7 @@ class RollingArtist:
                     "max": 10,
                     "step": 1,
                     "display": "slider",
-                    "description": "选择生成的艺术家人数（1-10）"
+                    "description": "选择生成的艺术家人数（1-10）；为 1 时进入 Exact 穷举模式"
                 }),
                 "artist_top_count": ("INT", {
                     "default": 1,
@@ -94,6 +163,10 @@ class RollingArtist:
                     "default": "",
                     "description": "自定义CSV路径，留空使用默认"
                 }),
+                "csv_column": ("STRING", {
+                    "default": "auto",
+                    "description": "CSV列选择：auto=自动识别表头与列（推荐）；all=展平所有列（旧行为）；也支持列序号(0/1/…)或表头列名(如 artist)"
+                }),
                 "exclude_artists": ("STRING", {
                     "default": "",
                     "description": "排除的艺术家，逗号分隔"
@@ -102,269 +175,240 @@ class RollingArtist:
                     "default": True,
                     "description": "是否按权重从高到低排序"
                 }),
+                "use_top_priority": ("BOOLEAN", {
+                    "default": True,
+                    "description": "是否启用Top艺术家优先池；关闭后从完整CSV中均匀抽取"
+                }),
+                "force_include": ("STRING", {
+                    "default": "",
+                    "description": "强制包含的艺术家，逗号分隔（优先级高于 exclude_artists）"
+                }),
+                "dedup_mode": (["none", "full_prompt", "artist_set", "artist_list"], {
+                    "default": "none",
+                    "description": "去重模式：none=不去重；full_prompt=顺序+权重完全一致；artist_set=艺术家集合（忽略顺序与权重）；artist_list=排序后的艺术家名（忽略权重）"
+                }),
+                "tested_csv_path": ("STRING", {
+                    "default": "",
+                    "description": "记录已生成组合的CSV路径，留空使用节点目录下 tested_combinations.csv"
+                }),
+                "max_attempts": ("INT", {
+                    "default": 10,
+                    "min": 1,
+                    "max": 100,
+                    "step": 1,
+                    "description": "去重时的最大重试次数，超过后接受最后一次结果"
+                }),
             }
         }
 
-    # 定义节点的输出类型和名称
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("prompt", "artists_json")
-    FUNCTION = "generate_artists"  # 指定节点的主函数
-    CATEGORY = "RollingArtist"    # 节点分类
-    OUTPUT_NODE = True            # 标记为输出节点
+    FUNCTION = "generate_artists"
+    CATEGORY = "RollingArtist"
+    # 与原实现保持一致：作为输出节点，即使输出未被下游使用也会执行
+    OUTPUT_NODE = True
+    DESCRIPTION = "从艺术家 CSV 中随机抽取艺术家并分配随机权重，生成带权重的提示词，并输出结构化 JSON。"
+    OUTPUT_TOOLTIPS = ("生成的提示词", "结构化结果 JSON（艺术家 / 权重 / 是否 Top / 状态）")
 
     def __init__(self) -> None:
-        """
-        初始化RollingArtist实例
-        
-        - 加载艺术家列表
-        - 初始化线程锁
-        - 创建艺术家池
-        - 设置默认的Top艺术家比例
-        """
-        self.artists = self.load_artists()  # 加载艺术家列表
-        self.lock = threading.Lock()       # 创建线程锁，确保线程安全
-        self.top_pool: List[str] = []      # 初始化Top艺术家池
-        self.non_top_pool: List[str] = []  # 初始化非Top艺术家池
-        self.update_top_pool(0.2)          # 使用默认比例更新艺术家池
+        """初始化节点实例：准备好仓库与状态容器。
 
-    def load_artists(self, csv_path: Optional[str] = None) -> List[str]:
+        注意：真正的加载发生在 ``generate_artists`` 中（按文件签名缓存），
+        这里只做一次默认 CSV 的预热，且任何异常都不会影响节点注册。
         """
-        从CSV文件加载艺术家列表
-        
-        返回:
-            艺术家名称列表，如果加载失败则返回空列表
-        """
-        csv_path = csv_path or os.path.join(os.path.dirname(__file__), "danbooru_art_001.csv")
+        self._repo: ArtistRepository = get_artist_repository()
+        self._lock = threading.RLock()
+        self.artists: List[str] = []
+        self._file_key: Optional[Tuple[str, int, int]] = None
+        self.top_count = 0
         try:
-            try:
-                mtime = os.path.getmtime(csv_path)
-            except Exception:
-                mtime = None
-            if getattr(self, "_last_csv_path", None) == csv_path and getattr(self, "_last_csv_mtime", None) == mtime and getattr(self, "artists", None):
-                return self.artists
-            with open(csv_path, "r", encoding="utf-8", newline="") as f:
-                reader = csv.reader(f)
-                result: List[str] = []
-                for row in reader:
-                    for artist in row:
-                        if artist:
-                            result.append(artist)
-                self.artists = result
-                self._last_csv_path = csv_path
-                self._last_csv_mtime = mtime
-                return result
-        except FileNotFoundError:
-            print(f"[RollingArtist] CSV文件未找到: {csv_path}")
-            return []
-        except Exception as e:
-            print(f"[RollingArtist] CSV加载失败: {str(e)}")
-            return []
+            self.artists, self._file_key = self._repo.load("", "auto")
+            self.top_count = compute_top_count(len(self.artists), 0.01)
+        except Exception as error:  # pragma: no cover - 初始化必须保持健壮
+            LOGGER.error("[RollingArtist] 初始化加载默认 CSV 失败: %s", error)
 
-    def update_top_pool(self, top_ratio: float) -> None:
-        """
-        根据比例更新Top艺术家池和非Top艺术家池
-        
-        参数:
-            top_ratio: 选取Top艺术家的比例(0.0-1.0)
-        """
-        if not self.artists:
-            return
-            
-        # 确保计算结果为整数
-        top_count = int(len(self.artists) * top_ratio)
-        # 至少保留1个艺术家
-        top_count = max(1, top_count)
-        
-        # 若比例未变且艺术家列表未变，跳过重算
-        if getattr(self, "_last_top_ratio", None) == top_ratio and getattr(self, "_last_artists_id", None) == id(self.artists) and self.top_pool and self.non_top_pool:
-            return
-        self.top_pool = self.artists[:top_count]
-        top_set = set(self.top_pool)
-        self.non_top_pool = [a for a in self.artists if a not in top_set]
-        self._last_top_ratio = top_ratio
-        self._last_artists_id = id(self.artists)
+    # ------------------------------------------------------------------
+    # 兼容接口（旧版本曾暴露的方法，保留以避免破坏外部调用）
+    # ------------------------------------------------------------------
+    @property
+    def top_pool(self) -> List[str]:
+        """Top 艺术家列表（按当前 Top 数量惰性切片）。"""
+        with self._lock:
+            return self.artists[:self.top_count]
 
-    def generate_fixed_weights(self, count: int, weight_min: float, 
-                              weight_max: float, weight_total: float, 
-                              rng: random.Random) -> List[float]:
-        """
-        生成符合约束的权重列表
-        
-        该方法确保生成的权重列表满足以下条件:
-        1. 每个权重值在weight_min和weight_max之间
-        2. 所有权重的总和精确等于weight_total(在有效范围内)
-        3. 权重分配具有随机性
-        
-        参数:
-            count: 需要生成的权重数量
-            weight_min: 单个权重的最小值
-            weight_max: 单个权重的最大值
-            weight_total: 期望的权重总和
-            rng: 随机数生成器
-            
-        返回:
-            生成的权重列表，每个值保留一位小数
-        """
-        n = count
-        # 确保权重总和在有效范围内
-        lower_bound = n * weight_min  # 最小可能的权重总和
-        upper_bound = n * weight_max  # 最大可能的权重总和
-        weight_total = max(lower_bound, min(weight_total, upper_bound))  # 调整权重总和到有效范围
-        weight_total = round(weight_total, 1)  # 确保权重总和保留一位小数
-        
-        # 初始化所有权重为最小值
-        weights = [weight_min] * n
-        
-        # 计算剩余可分配的权重总和
-        remaining = round(weight_total - sum(weights), 1)
-        
-        # 创建索引列表并随机打乱，确保随机分配
-        indices = list(range(n))
-        rng.shuffle(indices)
-        
-        # 单次循环分配剩余权重
-        for i in indices:
-            if i == indices[-1]:  # 最后一个元素
-                # 为最后一个元素分配所有剩余权重，确保总和精确匹配
-                addition = remaining
-                # 确保不超过最大权重限制
-                if weights[i] + addition > weight_max:
-                    addition = weight_max - weights[i]
-                    # 如果最后一个元素无法容纳所有剩余权重，尝试分配给其他元素
-                    extra = remaining - addition
-                    if extra > 0:
-                        for j in range(n):
-                            if j != i and weights[j] < weight_max:
-                                add_to_j = min(weight_max - weights[j], extra)
-                                weights[j] += add_to_j
-                                extra -= add_to_j
-                                if extra <= 0:
-                                    break
-            else:
-                # 计算当前权重可以增加的最大值
-                max_add = min(weight_max - weights[i], remaining * 0.8)  # 留出20%给后续元素
-                if max_add <= 0:
-                    continue  # 没有剩余权重可分配
-                    
-                # 随机分配一个增量值
-                addition = round(rng.uniform(0, max_add), 1)  # 随机增加的权重，保留一位小数
-            
-            weights[i] += addition
-            remaining = round(remaining - addition, 1)  # 更新剩余可分配权重
-            
-            if remaining <= 0:
-                break
-        
-        # 最终检查，确保权重总和精确等于目标值
-        actual_total = round(sum(weights), 1)
-        if actual_total != weight_total and n > 0:
-            # 找到可以调整的元素
-            for i in range(n):
-                if actual_total < weight_total and weights[i] < weight_max:
-                    weights[i] = round(weights[i] + (weight_total - actual_total), 1)
-                    break
-                elif actual_total > weight_total and weights[i] > weight_min:
-                    weights[i] = round(weights[i] - (actual_total - weight_total), 1)
-                    break
-        
-        # 返回最终权重列表，确保每个值保留一位小数
-        return [round(w, 1) for w in weights]
+    @property
+    def non_top_pool(self) -> List[str]:
+        """非 Top 艺术家列表（按当前 Top 数量惰性切片）。"""
+        with self._lock:
+            return self.artists[self.top_count:]
 
+    def load_artists(self, csv_path: Optional[str] = None, column: str = "auto") -> List[str]:
+        """加载（并按文件修改时间缓存）艺术家列表。"""
+        artists, file_key = self._repo.load(csv_path or "", column)
+        if artists:
+            with self._lock:
+                self.artists, self._file_key = artists, file_key
+        return artists
+
+    def update_top_pool(self, top_ratio: float) -> int:
+        """按比例刷新 Top 艺术家数量，返回该数量。"""
+        with self._lock:
+            self.top_count = compute_top_count(len(self.artists), top_ratio)
+            return self.top_count
+
+    def generate_fixed_weights(self, count: int, weight_min: float, weight_max: float,
+                               weight_total: float, rng: random.Random) -> List[float]:
+        """（兼容保留）生成符合约束的权重列表。"""
+        return generate_weights(count, weight_min, weight_max, weight_total, rng)
+
+    # ------------------------------------------------------------------
+    # 主流程
+    # ------------------------------------------------------------------
     def generate_artists(self, artist_count: int, artist_top_count: int,
-                        artist_top_ratio: float, artists_prefix: bool,
-                        weight_min: float, weight_max: float,
-                        weight_total: float, seed: int,
-                        custom_csv_path: str = "", exclude_artists: str = "",
-                        sort_by_weight: bool = True) -> Tuple[str, str]:
-        """
-        主生成函数，根据参数生成艺术家提示词
-        
-        该方法执行以下步骤:
-        1. 更新艺术家池
-        2. 选择指定数量的艺术家(包括Top艺术家和非Top艺术家)
-        3. 为每个艺术家生成权重
-        4. 构建最终的提示词字符串
-        
-        参数:
-            artist_count: 要生成的艺术家总数
-            artist_top_count: 要包含的Top艺术家数量
-            artist_top_ratio: Top艺术家池的比例
-            artists_prefix: 是否添加'artist:'前缀
-            weight_min: 单个艺术家的最小权重
-            weight_max: 单个艺术家的最大权重
-            weight_total: 所有权重的总和
-            seed: 随机数种子
-            
-        返回:
-            包含生成的提示词字符串的元组
-        """
-        # 读取CSV不加锁，避免阻塞；仅在赋值时加锁
-        if custom_csv_path:
-            new_artists = self.load_artists(custom_csv_path)
-            with self.lock:
-                self.artists = new_artists
-        with self.lock:
-            if artist_count < 1 or not self.artists:
-                return ("", "")
-                
-            # 更新Top艺术家池（根据CSV前百分比）
-            self.update_top_pool(artist_top_ratio)
+                         artist_top_ratio: float, artists_prefix: bool,
+                         weight_min: float, weight_max: float,
+                         weight_total: float, seed: int,
+                         custom_csv_path: str = "", exclude_artists: str = "",
+                         sort_by_weight: bool = True, use_top_priority: bool = True,
+                         force_include: str = "", dedup_mode: str = "none",
+                         tested_csv_path: str = "", max_attempts: int = 10,
+                         csv_column: str = "auto") -> Tuple[str, str]:
+        """生成艺术家提示词。
 
-            exclude_set = set([a.strip() for a in exclude_artists.split(",") if a.strip()])
-            available_top_pool = [a for a in self.top_pool if a not in exclude_set]
-            available_non_top_pool = [a for a in self.non_top_pool if a not in exclude_set]
-            
-            # 计算实际要输出的Top数量（直接使用输入值）
-            actual_top = max(1, min(
-                artist_top_count,  # 用户指定的Top数量
-                artist_count,      # 不能超过总艺术家数
-                len(self.top_pool) # 不能超过可用的Top艺术家数
-            ))
-            
-            # 初始化随机数生成器
-            rng = random.Random(seed)
-            
-            # 确保至少选择1个Top艺术家
-            selected_top = rng.sample(available_top_pool, min(actual_top, len(available_top_pool)))
-            # 计算剩余需要的艺术家数量
-            remaining = max(0, artist_count - len(selected_top))
-            # 从非Top池中选择剩余数量的艺术家
-            selected_non_top = rng.sample(available_non_top_pool, min(remaining, len(available_non_top_pool)))
-            
-            # 合并并随机打乱最终的艺术家列表
-            final_order = selected_top + selected_non_top
-            rng.shuffle(final_order)
-            
-            # 为选中的艺术家生成权重
-            weights = self.generate_fixed_weights(
-                len(final_order), weight_min, weight_max, weight_total, rng
+        参数与界面一致；``artist_count == 1`` 且未设置 ``force_include`` 时进入 Exact 模式。
+
+        返回:
+            ``(prompt, artists_json)``
+        """
+        count = _as_int(artist_count, 1)
+        if count < 1:
+            raise ValueError(f"[RollingArtist] artist_count 必须 >= 1，当前值: {artist_count!r}")
+
+        # 1) 加载艺术家列表（内容未变化时直接命中缓存，不重复解析 CSV）
+        artists, file_key = self._repo.load(custom_csv_path, csv_column)
+        if not artists:
+            raise ValueError(
+                "[RollingArtist] 未能从 CSV 加载艺术家列表，请检查文件是否存在、"
+                f"编码是否为 UTF-8、csv_column 设置是否正确: "
+                f"{self._repo.resolve_path(_text(custom_csv_path))}"
             )
 
-            if sort_by_weight and final_order:
-                pairs = list(zip(final_order, weights))
-                pairs.sort(key=lambda x: x[1], reverse=True)
-                final_order, weights = [p[0] for p in pairs], [p[1] for p in pairs]
-            
-            # 构建prompt
-            prefix = "artist:" if artists_prefix else ""
-            prompt_parts = [
-                (f"{prefix}{artist}" if weight == 1.0 else f"({prefix}{artist}:{weight})")
-                for artist, weight in zip(final_order, weights)
-            ]
-            
-            prompt = ",".join(prompt_parts)
-            top_set = set(self.top_pool)
-            data = {
-                "artists": [
-                    {
-                        "name": artist,
-                        "weight": weight,
-                        "top": artist in top_set,
-                    }
-                    for artist, weight in zip(final_order, weights)
-                ]
-            }
-            return (prompt, json.dumps(data, ensure_ascii=False))
+        # 2) 参数规范化（兼容 API 直接传入 None / 字符串的情况）
+        exclude_set = set(split_names(exclude_artists))
+        force_list = split_names(force_include)
+        candidates = artists if not exclude_set else [
+            name for name in artists if name not in exclude_set
+        ]
+        if not candidates and not force_list:
+            raise ValueError("[RollingArtist] exclude_artists 排除了全部艺术家，无可用艺术家")
+
+        top_count = compute_top_count(len(artists), artist_top_ratio)
+        with self._lock:
+            self.artists, self._file_key, self.top_count = artists, file_key, top_count
+
+        prefix = "artist:" if _as_bool(artists_prefix, True) else ""
+        mode = normalize_dedup_mode(dedup_mode)
+        attempts = max(1, _as_int(max_attempts, 10))
+        rng_seed = _as_int(seed, 0)
+        low = _as_float(weight_min, 0.2)
+        high = _as_float(weight_max, 1.0)
+        total = _as_float(weight_total, 2.0)
+        tested_path = _text(tested_csv_path).strip() or DEFAULT_TESTED_CSV
+        store = get_tested_store(tested_path)
+
+        # 3) Exact 模式：穷举 (艺术家, 权重)，穷举完之前绝不重复
+        if count == 1 and not force_list:
+            return self._generate_exact(
+                candidates, artists, top_count, store, tested_path,
+                rng_seed, low, high, prefix, attempts,
+            )
+
+        # 4) 常规模式：整段生成处于“按路径共享”的锁内，避免多实例产生重复组合
+        with store.generation_lock():
+            tested_keys = store.keys(mode)
+            last_result: Optional[Tuple[List[str], List[float], str]] = None
+
+            for attempt in range(attempts):
+                rng = random.Random(rng_seed + attempt)
+                selected = select_artists(
+                    rng, count, _as_int(artist_top_count, 1), force_list,
+                    artists, top_count if _as_bool(use_top_priority, True) else 0,
+                    exclude_set,
+                )
+                if not selected:
+                    continue
+
+                weights = generate_weights(len(selected), low, high, total, rng)
+                if _as_bool(sort_by_weight, True):
+                    pairs = sorted(zip(selected, weights), key=lambda item: item[1], reverse=True)
+                    selected = [item[0] for item in pairs]
+                    weights = [item[1] for item in pairs]
+
+                prompt = build_prompt(selected, weights, prefix)
+                last_result = (selected, weights, prompt)
+
+                if mode == "none" or dedup_key(mode, selected, weights) not in tested_keys:
+                    break
+
+            if last_result is None:
+                raise ValueError("[RollingArtist] 未选出任何艺术家，请检查 artist_count 与排除名单")
+
+            selected, weights, prompt = last_result
+            store.record(selected, weights, prompt)
+
+        payload = self._build_payload(selected, weights, artists, top_count)
+        return prompt, json.dumps(payload, ensure_ascii=False)
+
+    # ------------------------------------------------------------------
+    # 内部实现
+    # ------------------------------------------------------------------
+    def _generate_exact(self, candidates: List[str], artists: List[str], top_count: int,
+                        store: TestedStore, tested_path: str, rng_seed: int,
+                        weight_min: float, weight_max: float, prefix: str,
+                        attempts: int) -> Tuple[str, str]:
+        """Exact 模式：每次返回一个未测过的 ``(艺术家, 权重)`` 组合。
+
+        全部穷举后返回 ``("ALL_COMBINATIONS_TESTED", json)``。
+        """
+        remaining_path = remaining_path_for(tested_path)
+        with store.generation_lock():
+            tested_keys = store.keys("full_prompt")
+            rng = random.Random(rng_seed)
+            combo = take_exact(
+                remaining_path, rng, candidates,
+                weight_grid(weight_min, weight_max), tested_keys, attempts,
+            )
+            if combo is None:
+                payload = {"status": _STATUS_ALL_TESTED, "artists": []}
+                return _STATUS_ALL_TESTED, json.dumps(payload, ensure_ascii=False)
+
+            artist, weight = combo
+            prompt = build_prompt([artist], [weight], prefix)
+            store.record([artist], [weight], prompt)
+
+        payload = self._build_payload([artist], [weight], artists, top_count)
+        return prompt, json.dumps(payload, ensure_ascii=False)
+
+    @staticmethod
+    def _build_payload(selected: List[str], weights: List[float],
+                       artists: List[str], top_count: int) -> Dict[str, Any]:
+        """组装结构化输出：艺术家 / 权重 / 是否 Top / 状态。"""
+        # top_count >= 总数时全员都是 Top，无需构建集合（大 CSV 下可省下可观内存）
+        top_names: Optional[Set[str]] = None
+        if top_count < len(artists):
+            top_names = set(artists[:top_count])
+        return {
+            "artists": [
+                {
+                    "name": name,
+                    "weight": weight,
+                    "top": top_names is None or name in top_names,
+                }
+                for name, weight in zip(selected, weights)
+            ],
+            "status": _STATUS_OK,
+        }
+
 
 # 注册节点类
 NODE_CLASS_MAPPINGS = {"RollingArtist": RollingArtist}

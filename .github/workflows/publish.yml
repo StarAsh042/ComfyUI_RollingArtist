@@ -1,0 +1,30 @@
+name: Publish to Comfy registry
+
+# 触发条件：
+# 1) 手动触发（Actions 页面 Run workflow）
+# 2) 推送到 main/master 且 pyproject.toml 有变更（通常是递增 version）
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "pyproject.toml"
+
+permissions:
+  issues: write
+
+jobs:
+  publish-node:
+    name: Publish Custom Node to registry
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'StarAsh042' }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Publish Custom Node
+        uses: Comfy-Org/publish-node-action@1.0.1
+        with:
+          ## 在仓库 Settings -> Secrets and variables -> Actions 中配置该 Secret
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
