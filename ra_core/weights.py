@@ -48,6 +48,7 @@ def generate_weights(count: int, weight_min: float, weight_max: float,
     1. 每个权重 ∈ [weight_min, weight_max]（不会越界；weight_max < weight_min 时自动交换）
     2. 权重总和精确等于 weight_total（超出可行区间时夹到边界）
     3. 每个权重保留一位小数，且分配结果带随机性
+    4. 权重恒为非负：传入负数（API 直传可能出现）会被夹到 0
 
     实现说明：所有运算都在“0.1 的整数倍”单位上进行，避免浮点累计误差；
     先按随机倾向值做近似平均的分配，再用最大余数法与容量回填保证总和精确，
@@ -61,6 +62,9 @@ def generate_weights(count: int, weight_min: float, weight_max: float,
     high_units = _to_units(weight_max)
     if high_units < low_units:  # 容忍参数写反的情况
         low_units, high_units = high_units, low_units
+    # 边界保护：负数权重在提示词里无意义，会污染总和与条件编码
+    low_units = max(0, low_units)
+    high_units = max(0, high_units)
 
     total_units = _to_units(weight_total)
     # 夹到可行区间：n * min <= total <= n * max
@@ -168,16 +172,27 @@ def normalize_dedup_mode(mode: Optional[str]) -> str:
     return value if value in DEDUP_MODES else "none"
 
 
+def _escape_key_part(value: str) -> str:
+    """转义键分隔符：把 | 与 : 变成重复字符（可逆的重复表示法）。"""
+    return str(value).replace(_KEY_SEP, _KEY_SEP * 2).replace(":", "::")
+
+
 def dedup_key(mode: str, artists: Sequence[str], weights: Sequence[float]) -> str:
-    """按去重模式计算组合的唯一键；mode 为 none 时返回空字符串。"""
+    """按去重模式计算组合的唯一键；mode 为 none 时返回空字符串。
+
+    名称中的分隔符会被转义，因此 ``["a:b"]`` 与 ``["a", "b"]`` 不会拼出同一个键。
+    旧实现直接拼接，艺术家名含 ``:`` / ``|`` 时会把不同组合判成同一个，
+    导致这些组合永远不被输出（去重假阳性）。
+    """
     if mode == "full_prompt":
         return _KEY_SEP.join(
-            f"{artist}:{round(float(weight), 1)}" for artist, weight in zip(artists, weights)
+            f"{_escape_key_part(artist)}:{round(float(weight), 1)}"
+            for artist, weight in zip(artists, weights)
         )
     if mode == "artist_set":
-        return _KEY_SEP.join(sorted(set(artists)))
+        return _KEY_SEP.join(sorted(_escape_key_part(name) for name in set(artists)))
     if mode == "artist_list":
-        return _KEY_SEP.join(sorted(artists))
+        return _KEY_SEP.join(sorted(_escape_key_part(name) for name in artists))
     return ""
 
 

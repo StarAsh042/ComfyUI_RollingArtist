@@ -24,6 +24,10 @@ __all__ = [
     "get_tested_store",
 ]
 
+# 头部快照长度：用于判断文件是否被整体替换（追加写入不会改变头部内容）
+_HEAD_BYTES = 128
+
+
 # ----------------------------------------------------------------------
 # 基础 IO
 # ----------------------------------------------------------------------
@@ -106,11 +110,12 @@ def parse_tested_row(row: Sequence[str]) -> Tuple[List[str], List[float]]:
 class _ModeState:
     """单个去重模式的增量解析状态。"""
 
-    __slots__ = ("offset", "keys")
+    __slots__ = ("offset", "keys", "head")
 
     def __init__(self) -> None:
         self.offset = 0          # 已解析到的字节位置
         self.keys: Set[str] = set()
+        self.head: Optional[bytes] = None   # 文件头部快照，用于识别“被整体替换”
 
 
 class TestedStore:
@@ -161,24 +166,38 @@ class TestedStore:
 
     # ------------------------------------------------------------------
     def _refresh(self, state: _ModeState, mode: str) -> None:
-        """把文件中新增的记录解析进 state.keys。"""
+        """把文件中新增的记录解析进 state.keys。
+
+        用“头部快照 + 文件长度”双重校验判断文件是否仍是之前那份：
+        追加写入不会改变头部内容，因此可安全地只解析新增部分；
+        一旦头部不再是旧的头部（例如用户用备份整体替换了该文件），
+        就从 0 重新解析，避免从旧偏移继续读导致键集合掺杂、漏判已测组合。
+        """
         try:
             size = os.path.getsize(self.path)
         except OSError:
             # 文件不存在或不可访问：重置状态，等待下次重建
             state.offset = 0
             state.keys.clear()
-            return
-
-        if size < state.offset:
-            # 文件被截断或替换（例如用户删除了记录），需要整体重读
-            state.offset = 0
-            state.keys.clear()
-        if size == state.offset:
+            state.head = None
             return
 
         try:
             with open(self.path, "rb") as handle:
+                head = handle.read(_HEAD_BYTES)
+                if state.head is not None and not head.startswith(state.head):
+                    # 头部不匹配 = 文件被整体替换，旧偏移与旧键都不可靠
+                    state.offset = 0
+                    state.keys.clear()
+                state.head = head
+
+                if size < state.offset:
+                    # 文件被截断（例如用户删除了部分记录），需要整体重读
+                    state.offset = 0
+                    state.keys.clear()
+                if size == state.offset:
+                    return
+
                 handle.seek(state.offset)
                 raw = handle.read()
         except OSError as error:

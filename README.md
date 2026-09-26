@@ -110,6 +110,8 @@ ComfyUI_RollingArtist/
 ## Exact 模式与去重的注意事项
 
 - Exact 模式下 `artists_json` 的 `top` 字段来自当前 Top 池，若中途替换了艺术家 CSV，该标记可能与实际不符
+- Exact 模式下 `dedup_mode` 与 `weight_total` **不生效**：去重固定按 `full_prompt` 判定，
+  权重按 `weight_min`~`weight_max` 网格取单个值；以某组配置首次进入该模式时会输出一条 INFO 提示
 - 去重依赖 `tested_csv_path` 的历史记录，更换该路径相当于重置去重状态
 - 同一 `tested_csv_path` 上的“读取已测 → 生成 → 记录”由进程内共享锁保护，
   多个 RollingArtist 实例（或并发线程）不会生成重复组合
@@ -124,6 +126,8 @@ ComfyUI_RollingArtist/
 - **线程安全设计**：进程级共享缓存 + 可重入锁；文件写入使用原子替换
 - **明确的错误处理**：统一使用 `logging`，CSV 缺失 / 解析失败 / 参数非法时抛出可读异常，
   不再静默返回空提示词
+- **降级必有信号**：可用艺术家不足、重试耗尽后返回重复组合、已测记录写入失败、
+  组合已穷举完毕，均会输出 WARNING / ERROR 日志（批量执行时不会刷屏）
 
 ## 使用示例
 

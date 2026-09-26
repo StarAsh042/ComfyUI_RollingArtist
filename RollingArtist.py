@@ -58,6 +58,7 @@ def _as_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):
+        LOGGER.warning("[RollingArtist] 参数 %r 不是合法整数，回退为默认值 %r", value, default)
         return default
 
 
@@ -65,6 +66,7 @@ def _as_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
+        LOGGER.warning("[RollingArtist] 参数 %r 不是合法数值，回退为默认值 %r", value, default)
         return default
 
 
@@ -76,6 +78,24 @@ def _as_bool(value: Any, default: bool = True) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in ("", "false", "0", "no", "off")
     return bool(value)
+
+
+# Exact 模式“忽略 dedup_mode / weight_total”的提示按配置去重，避免批量执行时刷屏
+_exact_notices: Set[str] = set()
+
+
+def _notify_exact_mode(mode: str, raw_dedup_mode: Any, weight_total: float) -> None:
+    """提示 Exact 模式固定按 full_prompt 去重且不使用 weight_total（同配置只提示一次）。"""
+    key = f"{mode}|{weight_total!r}"
+    if key in _exact_notices:
+        return
+    _exact_notices.add(key)
+    if mode != "full_prompt" or weight_total != 0.0:
+        LOGGER.info(
+            "[RollingArtist] artist_count=1 进入 Exact 穷举模式：dedup_mode=%r 与 weight_total=%r "
+            "不生效（固定按 full_prompt 去重，权重按 weight_min~weight_max 网格枚举）",
+            raw_dedup_mode, weight_total,
+        )
 
 
 class RollingArtist:
@@ -149,7 +169,7 @@ class RollingArtist:
                     "max": 20.0,
                     "step": 0.5,
                     "display": "slider",
-                    "description": "所有权重值的总和"
+                    "description": "所有权重值的总和；artist_count=1 进入 Exact 穷举模式时不生效（改为按 weight_min~weight_max 网格枚举单个权重）"
                 }),
                 "seed": ("INT", {
                     "default": 1234,
@@ -185,7 +205,7 @@ class RollingArtist:
                 }),
                 "dedup_mode": (["none", "full_prompt", "artist_set", "artist_list"], {
                     "default": "none",
-                    "description": "去重模式：none=不去重；full_prompt=顺序+权重完全一致；artist_set=艺术家集合（忽略顺序与权重）；artist_list=排序后的艺术家名（忽略权重）"
+                    "description": "去重模式：none=不去重；full_prompt=顺序+权重完全一致；artist_set=艺术家集合（忽略顺序与权重）；artist_list=排序后的艺术家名（忽略权重）；artist_count=1 的 Exact 模式固定按 full_prompt 判定"
                 }),
                 "tested_csv_path": ("STRING", {
                     "default": "",
@@ -219,10 +239,10 @@ class RollingArtist:
         self._repo: ArtistRepository = get_artist_repository()
         self._lock = threading.RLock()
         self.artists: List[str] = []
-        self._file_key: Optional[Tuple[str, int, int]] = None
         self.top_count = 0
         try:
-            self.artists, self._file_key = self._repo.load("", "auto")
+            # 文件签名缓存由 ArtistRepository 统一维护，实例不再保存签名
+            self.artists, _ = self._repo.load("", "auto")
             self.top_count = compute_top_count(len(self.artists), 0.01)
         except Exception as error:  # pragma: no cover - 初始化必须保持健壮
             LOGGER.error("[RollingArtist] 初始化加载默认 CSV 失败: %s", error)
@@ -244,10 +264,10 @@ class RollingArtist:
 
     def load_artists(self, csv_path: Optional[str] = None, column: str = "auto") -> List[str]:
         """加载（并按文件修改时间缓存）艺术家列表。"""
-        artists, file_key = self._repo.load(csv_path or "", column)
+        artists, _ = self._repo.load(csv_path or "", column)
         if artists:
             with self._lock:
-                self.artists, self._file_key = artists, file_key
+                self.artists = artists
         return artists
 
     def update_top_pool(self, top_ratio: float) -> int:
@@ -285,7 +305,7 @@ class RollingArtist:
             raise ValueError(f"[RollingArtist] artist_count 必须 >= 1，当前值: {artist_count!r}")
 
         # 1) 加载艺术家列表（内容未变化时直接命中缓存，不重复解析 CSV）
-        artists, file_key = self._repo.load(custom_csv_path, csv_column)
+        artists, _ = self._repo.load(custom_csv_path, csv_column)
         if not artists:
             raise ValueError(
                 "[RollingArtist] 未能从 CSV 加载艺术家列表，请检查文件是否存在、"
@@ -304,7 +324,7 @@ class RollingArtist:
 
         top_count = compute_top_count(len(artists), artist_top_ratio)
         with self._lock:
-            self.artists, self._file_key, self.top_count = artists, file_key, top_count
+            self.artists, self.top_count = artists, top_count
 
         prefix = "artist:" if _as_bool(artists_prefix, True) else ""
         mode = normalize_dedup_mode(dedup_mode)
@@ -317,7 +337,9 @@ class RollingArtist:
         store = get_tested_store(tested_path)
 
         # 3) Exact 模式：穷举 (艺术家, 权重)，穷举完之前绝不重复
+        #    该模式固定使用 full_prompt 去重键，不参与 weight_total 分配（按权重网格枚举单权重）
         if count == 1 and not force_list:
+            _notify_exact_mode(mode, dedup_mode, total)
             return self._generate_exact(
                 candidates, artists, top_count, store, tested_path,
                 rng_seed, low, high, prefix, attempts,
@@ -337,6 +359,12 @@ class RollingArtist:
                 )
                 if not selected:
                     continue
+                if len(selected) < count:
+                    LOGGER.warning(
+                        "[RollingArtist] 可用艺术家不足：请求 %d 个，实际选中 %d 个"
+                        "（请检查 artist_count、排除名单或 CSV 规模）",
+                        count, len(selected),
+                    )
 
                 weights = generate_weights(len(selected), low, high, total, rng)
                 if _as_bool(sort_by_weight, True):
@@ -354,7 +382,18 @@ class RollingArtist:
                 raise ValueError("[RollingArtist] 未选出任何艺术家，请检查 artist_count 与排除名单")
 
             selected, weights, prompt = last_result
-            store.record(selected, weights, prompt)
+            # 循环耗尽说明末次结果仍命中已测组合（mode != none 时才可能），
+            # 保留原有“接受并记录”语义，仅补上信号便于排查“反复出同一图”
+            if mode != "none" and dedup_key(mode, selected, weights) in tested_keys:
+                LOGGER.warning(
+                    "[RollingArtist] 已试 %d 次均命中已测组合（dedup_mode=%s），返回重复结果: %s",
+                    attempts, mode, prompt,
+                )
+            if not store.record(selected, weights, prompt):
+                LOGGER.error(
+                    "[RollingArtist] 已测记录写入失败(%s)，本次组合未落盘，后续可能重复生成: %s",
+                    tested_path, prompt,
+                )
 
         payload = self._build_payload(selected, weights, artists, top_count)
         return prompt, json.dumps(payload, ensure_ascii=False)
@@ -379,12 +418,20 @@ class RollingArtist:
                 weight_grid(weight_min, weight_max), tested_keys, attempts,
             )
             if combo is None:
+                LOGGER.warning(
+                    "[RollingArtist] 组合已穷举完(%s)，prompt 返回 %s",
+                    remaining_path, _STATUS_ALL_TESTED,
+                )
                 payload = {"status": _STATUS_ALL_TESTED, "artists": []}
                 return _STATUS_ALL_TESTED, json.dumps(payload, ensure_ascii=False)
 
             artist, weight = combo
             prompt = build_prompt([artist], [weight], prefix)
-            store.record([artist], [weight], prompt)
+            if not store.record([artist], [weight], prompt):
+                LOGGER.error(
+                    "[RollingArtist] 已测记录写入失败(%s)，该组合可能被再次发出: %s",
+                    tested_path, prompt,
+                )
 
         payload = self._build_payload([artist], [weight], artists, top_count)
         return prompt, json.dumps(payload, ensure_ascii=False)

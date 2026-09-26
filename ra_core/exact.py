@@ -67,8 +67,9 @@ class ExactPool:
                     return None
                 combos = list(build())
                 if not combos:
-                    if self._signature is not None:
-                        self._save_locked([])
+                    # 无条件落盘空池：既标记“当前配置已穷举”，也避免文件不存在时
+                    # 之后每次执行都重做一次 O(组合总数) 的构建（旧实现仅在文件已存在时落盘）
+                    self._save_locked([])
                     return None
 
             index = rng.randrange(len(combos))

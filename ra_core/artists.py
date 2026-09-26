@@ -71,10 +71,13 @@ def _resolve_layout(sample_row: Sequence[str], spec: str, has_header: bool):
     if spec == COLUMN_ALL:
         return COLUMN_ALL
     if spec in ("", COLUMN_AUTO):
-        if has_header:
-            for name in COLUMN_PRIORITY:
-                if name in cells:
-                    return cells.index(name)
+        # 无论表头是否被完整识别，都先按优先级查找列名：
+        # 这样 "title,artist,count" 这类含有未知表头列的 CSV 也能取到正确的列。
+        # 旧实现只在整行都被识别为表头时才查找，否则回退首列，
+        # 会把 title / 计数列当成艺术家名（整列错位）。
+        for name in COLUMN_PRIORITY:
+            if name in cells:
+                return cells.index(name)
         return 0
     if spec.isdigit():
         index = int(spec)
@@ -113,6 +116,10 @@ def parse_artist_rows(rows: Iterable[Sequence[str]],
 
     has_header = is_header_row(first)
     layout = _resolve_layout(first, spec, has_header)
+    if not has_header and isinstance(layout, int) and layout > 0:
+        # auto 模式在“非首列”命中列名，说明首行就是表头（即使含有未识别的列名），
+        # 否则会把表头里的 artist 之类的字面量当成一个艺术家名
+        has_header = True
 
     artists: List[str] = []
     # 首行不是表头时它本身就是数据行，需要一并处理

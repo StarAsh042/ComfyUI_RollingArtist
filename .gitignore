@@ -4,3 +4,7 @@
 # 节点运行期生成的文件，不应进入版本库与发布包
 *.bak
 *.tmp
+
+# CodeBuddy 本地配置与本地项目记忆（技能目录 + 本机专用记忆，按官方约定不提交）
+.codebuddy
+CODEBUDDY.md
