@@ -116,24 +116,37 @@ class RollingArtist:
 
     @classmethod
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, Any]]:
-        """定义节点的输入参数类型和界面显示。"""
+        """定义节点的输入参数类型和界面显示。
+
+        界面顺序即下方字典顺序，按“抽样 → Top 池 → 权重 → 前缀/种子 → 抽样偏好 → 名单 →
+        去重 → 高级（CSV 与记录文件路径）”归类；很少改动的 CSV / 路径标记为 ``advanced``，
+        由前端折叠到“高级输入”。
+
+        关于重排的兼容性：当前前端保存工作流时同时写 ``widgets_values_named``（按名字）与
+        ``widgets_values``（按位置），读取时优先按名字恢复（settingStore 的 LiteGraph
+        ``serialize`` / ``getNamedValues``），因此本版本前端存出的工作流重排后依然正确；
+        只有“仅含位置数组”的旧版工作流会整体错位，必要时可用官方 ``io.NodeReplace``
+        （``old_widget_ids`` 把位置索引映射回输入 id）在换节点类名时兜底。
+
+        注意：``generate_artists`` 的形参顺序是给外部脚本按位置调用的接口，保持不变；
+        ComfyUI 本身按关键字传参，与这里的顺序无关。
+
+        参数说明使用 ``tooltip`` 键（V1 的 ``description`` 界面不读；V3 schema 的通用输入
+        参数即 ``tooltip`` / ``advanced`` / ``display_name``）。这里是默认文案（中文）；
+        中英文切换由 ``locales/<语言>/nodeDefs.json`` 提供，
+        节点帮助页（信息面板）由 ``web/docs/RollingArtist/<语言>.md`` 提供。
+        """
         return {
             "required": {
+                # ---------------- 抽样：抽几个人、从哪里抽 ----------------
                 "artist_count": ("INT", {
                     "default": 3,
                     "min": 1,
                     "max": 10,
                     "step": 1,
                     "display": "slider",
-                    "description": "选择生成的艺术家人数（1-10）；为 1 时进入 Exact 穷举模式"
-                }),
-                "artist_top_count": ("INT", {
-                    "default": 1,
-                    "min": 1,
-                    "max": 10,
-                    "step": 1,
-                    "display": "slider",
-                    "description": "输出中包含的Top艺术家数量（至少1个）"
+                    "tooltip": "每次生成的艺术家数量（1-10）。设为 1 且“强制包含”为空时进入 Exact 穷举模式："
+                               "按 (艺术家, 权重) 组合逐个不重复输出，穷举完返回 ALL_COMBINATIONS_TESTED"
                 }),
                 "artist_top_ratio": ("FLOAT", {
                     "default": 0.01,
@@ -141,19 +154,26 @@ class RollingArtist:
                     "max": 1.0,
                     "step": 0.01,
                     "display": "slider",
-                    "description": "提取CSV中Top艺术家占前百分比,已知CSV越靠前艺术家作品越多"
+                    "tooltip": "Top 池占比（0.01-1.0）：按 CSV 行序取前 ceil(总数×比例) 个（至少 1 个）作为 Top 池，"
+                               "行序越靠前的艺术家通常作品越多"
                 }),
-                "artists_prefix": ("BOOLEAN", {
-                    "default": True,
-                    "description": "是否为艺术家名称添加'artist:'前缀"
+                "artist_top_count": ("INT", {
+                    "default": 1,
+                    "min": 1,
+                    "max": 10,
+                    "step": 1,
+                    "display": "slider",
+                    "tooltip": "每次至少抽取几个 Top 池艺术家（1-10）；"
+                               "仅在“Top 优先抽样”开启且 Top 池非空时生效"
                 }),
+                # ---------------- 权重：范围与总和 ----------------
                 "weight_min": ("FLOAT", {
                     "default": 0.2,
                     "min": 0.1,
                     "max": 2.0,
                     "step": 0.1,
                     "display": "slider",
-                    "description": "单个艺术家最小权重值"
+                    "tooltip": "单个艺术家的权重下限（步长 0.1）；与上限写反时自动交换，负数会被夹到 0"
                 }),
                 "weight_max": ("FLOAT", {
                     "default": 1.0,
@@ -161,7 +181,7 @@ class RollingArtist:
                     "max": 2.0,
                     "step": 0.1,
                     "display": "slider",
-                    "description": "单个艺术家最大权重值"
+                    "tooltip": "单个艺术家的权重上限（步长 0.1）；每个权重都落在上限与下限之间"
                 }),
                 "weight_total": ("FLOAT", {
                     "default": 2.0,
@@ -169,54 +189,76 @@ class RollingArtist:
                     "max": 20.0,
                     "step": 0.5,
                     "display": "slider",
-                    "description": "所有权重值的总和；artist_count=1 进入 Exact 穷举模式时不生效（改为按 weight_min~weight_max 网格枚举单个权重）"
+                    "tooltip": "所有权重之和（步长 0.5），按总和精确分配，超出可行区间时夹到边界；"
+                               "artist_count=1 的 Exact 模式不生效（改为按 0.1 网格枚举单个权重）"
+                }),
+                # ---------------- 输出形式与随机性 ----------------
+                "artists_prefix": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "开启时输出 artist:名称（例如 (artist:xxx:0.8)），关闭时只输出名称本身"
                 }),
                 "seed": ("INT", {
                     "default": 1234,
                     "min": 0,
                     "max": 4294967295,
-                    "description": "控制随机性的种子值"
+                    "tooltip": "随机种子。同一种子在同一组参数下结果可复现；"
+                               "去重模式与重试次数会改变实际的抽样序列"
                 }),
             },
             "optional": {
-                "custom_csv_path": ("STRING", {
-                    "default": "",
-                    "description": "自定义CSV路径，留空使用默认"
-                }),
-                "csv_column": ("STRING", {
-                    "default": "auto",
-                    "description": "CSV列选择：auto=自动识别表头与列（推荐）；all=展平所有列（旧行为）；也支持列序号(0/1/…)或表头列名(如 artist)"
-                }),
-                "exclude_artists": ("STRING", {
-                    "default": "",
-                    "description": "排除的艺术家，逗号分隔"
+                # ---------------- 抽样偏好 ----------------
+                "use_top_priority": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "开启时优先从 Top 池抽人，并保证含 artist_top_count 个 Top 艺术家；"
+                               "关闭时从完整 CSV 均匀抽样"
                 }),
                 "sort_by_weight": ("BOOLEAN", {
                     "default": True,
-                    "description": "是否按权重从高到低排序"
+                    "tooltip": "开启时按权重从高到低重排提示词里的艺术家顺序；"
+                               "顺序会影响 full_prompt 去重键"
                 }),
-                "use_top_priority": ("BOOLEAN", {
-                    "default": True,
-                    "description": "是否启用Top艺术家优先池；关闭后从完整CSV中均匀抽取"
+                # ---------------- 名单 ----------------
+                "exclude_artists": ("STRING", {
+                    "default": "",
+                    "tooltip": "要排除的艺术家名，英文逗号分隔（例如 a,b,c）；被排除的名字不会出现在结果中"
                 }),
                 "force_include": ("STRING", {
                     "default": "",
-                    "description": "强制包含的艺术家，逗号分隔（优先级高于 exclude_artists）"
+                    "tooltip": "必须出现的艺术家名，英文逗号分隔；优先级高于“排除艺术家”，"
+                               "数量达到 artist_count 时直接从中随机抽取"
                 }),
+                # ---------------- 去重 ----------------
                 "dedup_mode": (["none", "full_prompt", "artist_set", "artist_list"], {
                     "default": "none",
-                    "description": "去重模式：none=不去重；full_prompt=顺序+权重完全一致；artist_set=艺术家集合（忽略顺序与权重）；artist_list=排序后的艺术家名（忽略权重）；artist_count=1 的 Exact 模式固定按 full_prompt 判定"
-                }),
-                "tested_csv_path": ("STRING", {
-                    "default": "",
-                    "description": "记录已生成组合的CSV路径，留空使用节点目录下 tested_combinations.csv"
+                    "tooltip": "去重依据：none=只记录不判重；full_prompt=艺术家顺序与权重完全一致；"
+                               "artist_set=艺术家集合一致（忽略顺序与权重）；"
+                               "artist_list=排序后的名字一致（忽略权重）。Exact 模式固定按 full_prompt 判定"
                 }),
                 "max_attempts": ("INT", {
                     "default": 10,
                     "min": 1,
                     "max": 100,
                     "step": 1,
-                    "description": "去重时的最大重试次数，超过后接受最后一次结果"
+                    "tooltip": "去重模式下的最大重试次数（1-100）；重试后仍全部命中已测组合时接受最后一次结果，"
+                               "并输出 WARNING 日志"
+                }),
+                # ---------------- 高级：CSV 与记录文件（界面默认折叠） ----------------
+                "csv_column": ("STRING", {
+                    "default": "auto",
+                    "advanced": True,
+                    "tooltip": "从 CSV 的哪一列读取艺术家：auto=自动识别表头（优先 artist/character/name/tag，"
+                               "无表头时取首列）；all=展平所有列（3.0.0 旧行为）；也可填列序号 0/1/… 或列名"
+                }),
+                "custom_csv_path": ("STRING", {
+                    "default": "",
+                    "advanced": True,
+                    "tooltip": "自定义艺术家 CSV 的路径；留空使用节点目录下的 danbooru_art_001.csv"
+                }),
+                "tested_csv_path": ("STRING", {
+                    "default": "",
+                    "advanced": True,
+                    "tooltip": "已测组合记录的文件路径；留空使用节点目录下的 tested_combinations.csv。"
+                               "更换该路径相当于重置去重进度"
                 }),
             }
         }
@@ -295,7 +337,8 @@ class RollingArtist:
                          csv_column: str = "auto") -> Tuple[str, str]:
         """生成艺术家提示词。
 
-        参数与界面一致；``artist_count == 1`` 且未设置 ``force_include`` 时进入 Exact 模式。
+        形参顺序是给外部脚本按位置调用的接口（与 ``INPUT_TYPES`` 的界面顺序无关，
+        ComfyUI 按关键字传参）；``artist_count == 1`` 且未设置 ``force_include`` 时进入 Exact 模式。
 
         返回:
             ``(prompt, artists_json)``

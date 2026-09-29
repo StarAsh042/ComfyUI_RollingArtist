@@ -6,6 +6,7 @@
 - ``weights``:   权重分配、提示词构建解析、去重键
 - ``storage``:   CSV 原子读写、已测组合的增量存储
 - ``exact``:     Exact 模式组合池
+- ``startup``:   启动期清理默认运行期记录文件（由 prestartup_script.py 调用）
 """
 
 from .artists import (
@@ -26,6 +27,7 @@ from .constants import (
     WEIGHT_STEP,
 )
 from .exact import ExactPool, get_exact_pool, remaining_path_for, take_exact
+from .startup import cleanup_default_runtime_files, default_runtime_files
 from .storage import TestedStore, get_tested_store, parse_tested_row
 from .weights import (
     DEDUP_MODES,
@@ -55,6 +57,8 @@ __all__ = [
     "get_exact_pool",
     "remaining_path_for",
     "take_exact",
+    "cleanup_default_runtime_files",
+    "default_runtime_files",
     "TestedStore",
     "get_tested_store",
     "parse_tested_row",

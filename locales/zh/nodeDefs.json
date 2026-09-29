@@ -1,0 +1,86 @@
+{
+  "RollingArtist": {
+    "display_name": "滚动艺术家",
+    "description": "从艺术家 CSV 中随机抽取艺术家并分配随机权重，生成带权重的提示词，并输出结构化 JSON。",
+    "inputs": {
+      "artist_count": {
+        "name": "艺术家数量",
+        "tooltip": "每次生成的艺术家数量（1-10）。设为 1 且“强制包含”为空时进入 Exact 穷举模式：按 (艺术家, 权重) 组合逐个不重复输出，穷举完返回 ALL_COMBINATIONS_TESTED"
+      },
+      "artist_top_ratio": {
+        "name": "Top 池占比",
+        "tooltip": "Top 池占比（0.01-1.0）：按 CSV 行序取前 ceil(总数×比例) 个（至少 1 个）作为 Top 池，行序越靠前的艺术家通常作品越多"
+      },
+      "artist_top_count": {
+        "name": "Top 抽取数量",
+        "tooltip": "每次至少抽取几个 Top 池艺术家（1-10）；仅在“Top 优先抽样”开启且 Top 池非空时生效"
+      },
+      "weight_min": {
+        "name": "权重下限",
+        "tooltip": "单个艺术家的权重下限（步长 0.1）；与上限写反时自动交换，负数会被夹到 0"
+      },
+      "weight_max": {
+        "name": "权重上限",
+        "tooltip": "单个艺术家的权重上限（步长 0.1）；每个权重都落在上限与下限之间"
+      },
+      "weight_total": {
+        "name": "权重总和",
+        "tooltip": "所有权重之和（步长 0.5），按总和精确分配，超出可行区间时夹到边界；artist_count=1 的 Exact 模式不生效（改为按 0.1 网格枚举单个权重）"
+      },
+      "artists_prefix": {
+        "name": "artist: 前缀",
+        "tooltip": "开启时输出 artist:名称（例如 (artist:xxx:0.8)），关闭时只输出名称本身"
+      },
+      "seed": {
+        "name": "随机种子",
+        "tooltip": "随机种子。同一种子在同一组参数下结果可复现；去重模式与重试次数会改变实际的抽样序列"
+      },
+      "use_top_priority": {
+        "name": "Top 优先抽样",
+        "tooltip": "开启时优先从 Top 池抽人，并保证含 artist_top_count 个 Top 艺术家；关闭时从完整 CSV 均匀抽样"
+      },
+      "sort_by_weight": {
+        "name": "按权重排序",
+        "tooltip": "开启时按权重从高到低重排提示词里的艺术家顺序；顺序会影响 full_prompt 去重键"
+      },
+      "exclude_artists": {
+        "name": "排除艺术家",
+        "tooltip": "要排除的艺术家名，英文逗号分隔（例如 a,b,c）；被排除的名字不会出现在结果中"
+      },
+      "force_include": {
+        "name": "强制包含",
+        "tooltip": "必须出现的艺术家名，英文逗号分隔；优先级高于“排除艺术家”，数量达到 artist_count 时直接从中随机抽取"
+      },
+      "dedup_mode": {
+        "name": "去重模式",
+        "tooltip": "去重依据：none=只记录不判重；full_prompt=艺术家顺序与权重完全一致；artist_set=艺术家集合一致（忽略顺序与权重）；artist_list=排序后的名字一致（忽略权重）。Exact 模式固定按 full_prompt 判定"
+      },
+      "max_attempts": {
+        "name": "最大重试次数",
+        "tooltip": "去重模式下的最大重试次数（1-100）；重试后仍全部命中已测组合时接受最后一次结果，并输出 WARNING 日志"
+      },
+      "csv_column": {
+        "name": "CSV 列",
+        "tooltip": "从 CSV 的哪一列读取艺术家：auto=自动识别表头（优先 artist/character/name/tag，无表头时取首列）；all=展平所有列（3.0.0 旧行为）；也可填列序号 0/1/… 或列名"
+      },
+      "custom_csv_path": {
+        "name": "自定义 CSV 路径",
+        "tooltip": "自定义艺术家 CSV 的路径；留空使用节点目录下的 danbooru_art_001.csv"
+      },
+      "tested_csv_path": {
+        "name": "已测记录路径",
+        "tooltip": "已测组合记录的文件路径；留空使用节点目录下的 tested_combinations.csv。更换该路径相当于重置去重进度"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "提示词",
+        "tooltip": "生成的提示词"
+      },
+      "1": {
+        "name": "艺术家 JSON",
+        "tooltip": "结构化结果 JSON（艺术家 / 权重 / 是否 Top / 状态）"
+      }
+    }
+  }
+}
