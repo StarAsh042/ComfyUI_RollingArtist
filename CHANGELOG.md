@@ -180,7 +180,7 @@
 - 许可证选用 **AGPL-3.0**（`1a55213`；3.1.0 时改为 MIT）
 - 补齐 `pyproject.toml` 与 ComfyUI Registry 发布工作流 `publish.yml`（`1fff5fa`）
 
-[4.1.0]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/9d9d5ba...HEAD
+[4.1.0]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/9d9d5ba...7041444
 [4.0.0]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/aa58ad1...9d9d5ba
 [3.2.0]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/c4164cc...aa58ad1
 [3.1.0]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/08f5d4f...c4164cc
