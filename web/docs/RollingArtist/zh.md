@@ -3,10 +3,11 @@
 从艺术家 CSV 中随机抽取艺术家、为每人分配随机权重，输出带权重的提示词与结构化 JSON。
 输出未被下游使用时节点仍会执行（输出节点）。
 
-- **输出 1 `prompt`**：提示词，例如 `(artist:xxx:0.8),(artist:yyy:0.6)`
-- **输出 2 `artists_json`**：`{"artists": [{"name", "weight", "top"}], "status"}`，`status` 为 `OK` 或 `ALL_COMBINATIONS_TESTED`
-- **输出 3 `tested_count`**：当前数据库里已记录的组合数量
-- **输出 4 `remaining_count`**：穷举模式下组合池剩余数量；非穷举模式恒为 `0`
+- **输出 1 提示词（`prompt`）**：例如 `(artist:xxx:0.8),(artist:yyy:0.6),`
+  - **末尾总是带一个逗号**（即使只抽到 1 个艺术家）：这样把画师提示词直接和角色节点的多行输出
+    拼在一起时，标签之间不会粘住。提示词语法里结尾多一个逗号没有副作用
+- **输出 2 艺术家 JSON（`artists_json`）**：`{"artists": [{"name", "weight", "top"}], "status"}`，`status` 目前恒为 `OK`
+- **输出 3 已测数量（`tested_count`）**：当前数据库里已记录的组合数量（**字符串**，可直接接到文本节点查看）
 
 ## 数据源与取列
 
@@ -18,55 +19,74 @@ CSV 里没有 `trigger` 列时退回首列并记 WARNING（此时可能是未转
 
 | 参数 | 类型 / 范围 | 说明 |
 |---|---|---|
-| `artist_count` | INT 1-10 | 每次生成的艺术家数量。`模式=自动` 时，设为 1 且“强制包含”为空会进入 **穷举模式** |
-| `artist_top_ratio` | FLOAT 0.01-1.0 | Top 池占比：按 CSV 行序取前 `ceil(总数×比例)` 个（至少 1 个），行序越靠前通常作品越多 |
-| `artist_top_count` | INT 1-10 | 每次至少抽取几个 Top 池艺术家（仅在“Top 优先抽样”开启且 Top 池非空时生效） |
-| `weight_min` | FLOAT 0.1-2.0 | 单个艺术家的权重下限；与上限写反会自动交换，负数夹到 0 |
-| `weight_max` | FLOAT 0.1-2.0 | 单个艺术家的权重上限 |
-| `weight_total` | FLOAT 0-20 | 所有权重之和，按总和精确分配，超出可行区间夹到边界（穷举模式不生效） |
-| `weight_curve` | ENUM | 分配曲线：`flat` 平坦（默认）/ `dominant` 主次分明 / `ramp` 阶梯。只影响谁分得多，不影响上下限与总和 |
-| `artists_prefix` | BOOLEAN | 开启输出 `artist:名称`，关闭只输出名称本身 |
-| `seed` | INT | 随机种子；同一种子在同一组参数下结果可复现 |
-
-## 生成模式
-
-| `mode` | 是否穷举 | 条件 |
-|---|---|---|
-| `auto`（默认） | `artist_count = 1` 且“强制包含”为空时穷举 | 与 3.2.x 行为一致 |
-| `random` | 从不穷举 | 只想抽 1 个艺术家时用这个 |
-| `exact` | 总是穷举 | 要求 `artist_count = 1` 且“强制包含”为空，否则**直接报错** |
+| 艺术家数量（`artist_count`） | INT 1-10 | 每次生成的艺术家数量；设为 1 就是随机抽 1 个 |
+| Top 池占比（`artist_top_ratio`） | FLOAT 0.01-1.0 | Top 池占比：按 CSV 行序取前 `ceil(总数×比例)` 个（至少 1 个），行序越靠前通常作品越多 |
+| Top 抽取数量（`artist_top_count`） | INT 1-10 | 每次至少抽取几个 Top 池艺术家（仅在「Top 优先抽样」开启且 Top 池非空时生效） |
+| 权重下限（`weight_min`） | FLOAT 0.1-2.0 | 单个艺术家的权重下限；与上限写反会自动交换，负数夹到 0 |
+| 权重上限（`weight_max`） | FLOAT 0.1-2.0 | 单个艺术家的权重上限 |
+| 权重总和（`weight_total`） | FLOAT 0-20 | 所有权重之和，按总和精确分配，超出可行区间夹到边界 |
+| 权重分配曲线（`weight_curve`） | ENUM | 分配曲线：`flat` 平坦（默认）/ `dominant` 主次分明 / `ramp` 阶梯。只影响谁分得多，不影响上下限与总和 |
+| artist: 前缀（`artists_prefix`） | BOOLEAN | 开启输出 `artist:名称`，关闭只输出名称本身 |
+| 随机种子（`seed`） | INT | 随机种子；同一种子在同一组参数下结果可复现 |
 
 ## 抽样偏好、名单与去重
 
 | 参数 | 类型 / 范围 | 说明 |
 |---|---|---|
-| `use_top_priority` | BOOLEAN | 优先从 Top 池抽人；关闭后从完整 CSV 均匀抽样 |
-| `sort_by_weight` | BOOLEAN | 按权重从高到低重排提示词中的艺术家顺序（影响 `full_prompt` 去重键） |
-| `exclude_artists` | STRING | 排除名单，英文逗号分隔 |
-| `force_include` | STRING | 必定出现的艺术家，英文逗号分隔；优先级高于排除名单 |
-| `dedup_mode` | ENUM | 去重依据：`none` / `full_prompt` / `artist_set` / `artist_list` |
-| `max_attempts` | INT 1-100 | 去重模式下的最大重试次数；仍全部命中已测组合时接受最后一次结果并输出 WARNING |
+| Top 优先抽样（`use_top_priority`） | BOOLEAN | 优先从 Top 池抽人；关闭后从完整 CSV 均匀抽样 |
+| 按权重排序（`sort_by_weight`） | BOOLEAN | 按权重从高到低重排提示词中的艺术家顺序（影响 `full_prompt` 去重键） |
+| 排除艺术家（`exclude_artists`） | STRING | 排除名单，英文逗号分隔 |
+| 强制包含（`force_include`） | STRING | 必定出现的艺术家，英文逗号分隔；优先级高于排除名单 |
+| 去重模式（`dedup_mode`） | ENUM | 去重依据，四选一，详见下面「去重模式详解」 |
+| 最大重试次数（`max_attempts`） | INT 1-100 | 去重模式下的最大重试次数；仍全部命中已测组合时接受最后一次结果并输出 WARNING |
+
+### 去重模式详解
+
+「去重」= 把这次抽到的组合和数据库里的历史记录比一比，命中就重抽（最多 `max_attempts` 次）。
+四种模式的区别只在**拿什么当比较依据**：
+
+| 模式 | 比较的是什么 | 什么情况算「重复」 | 典型用途 |
+|---|---|---|---|
+| `none`（默认） | 不比较 | ——（只把结果记进数据库，不判重） | 想要纯随机、每次都出新图；进度靠 `tested_count` 看 |
+| `full_prompt` | 艺术家**列表 + 顺序 + 权重** | 三者完全一致 | 最严格：不希望出现一模一样的提示词 |
+| `artist_set` | 艺术家**集合**（忽略顺序与权重） | 抽到同一批人就算，哪怕顺序、权重不同 | 不希望重复画同一批画师，但允许换权重微调 |
+| `artist_list` | 排序后的**名字列表**（忽略权重） | 同一批人（顺序无关）即算 | 与 `artist_set` 基本等价；区别只在名字重复时是否折叠 |
+
+补充说明：
+
+- 权重只在 `full_prompt` 下参与比较；`artist_set` / `artist_list` 都忽略权重，
+  所以「同一批人换个权重」在它们眼里仍然是重复的
+- `artist_set` 会折叠重复名字，`artist_list` 不会（`["a","a","b"]` 与 `["a","b"]` 在
+  `artist_set` 下相同、在 `artist_list` 下不同）
+- `sort_by_weight` 会改变提示词里的顺序，因此会间接影响 `full_prompt` 的判定结果
+- 名字里的 `|` / `:` 会被转义后再拼键，所以 `["a:b"]` 与 `["a","b"]` 不会被误判成同一个组合
+- 重抽次数用尽仍命中时，节点会**接受最后一次结果**并打一条 WARNING 日志（不会卡住不让出图）
 
 ## 高级参数（界面默认折叠）
 
 | 参数 | 类型 | 说明 |
 |---|---|---|
-| `custom_csv_path` | STRING | 自定义艺术家 CSV 路径；留空使用节点目录下的 `danbooru_art_001.csv` |
-| `tested_db_path` | STRING | 记录数据库（SQLite）路径；留空使用节点目录下的 `rollingartist.sqlite`。已测记录与穷举组合池都在这个文件里，更换路径相当于重置去重进度 |
+| 自定义 CSV 路径（`custom_csv_path`） | STRING | 自定义艺术家 CSV 路径；留空使用节点目录下的 `danbooru_art_001.csv` |
+| 记录数据库路径（`tested_db_path`） | STRING | 记录数据库（SQLite）路径；留空使用节点目录下的 `rollingartist.sqlite`。已测记录在这个文件里，更换路径相当于重置去重进度 |
 
-## 两种工作模式
+## 生成流程
 
-- **常规模式**：按参数随机抽取并分配权重，命中已测组合时重试（最多 `max_attempts` 次）。
-- **穷举模式**（`artist_count=1` 且“强制包含”为空，或 `模式=穷举`）：按 `(艺术家, 权重)` 组合逐个不重复输出，
-  组合池持久化在数据库里；全部穷举后返回 `ALL_COMBINATIONS_TESTED`。
-  该模式下 `dedup_mode` 与 `weight_total` **不生效**（固定按 `full_prompt` 判定，权重按 0.1 网格枚举）。
-  组合总量超过 100 万时不建立组合池，改为「随机采样 + 去重」（此时 `remaining_count` 恒为 0）。
+节点只做一件事：按参数随机抽取艺术家并分配权重，命中已测组合时重试（最多 `max_attempts` 次），
+然后把结果与去重键写进数据库。
+
+> 4.1.0 起**删除了「穷举模式」**（原先 `artist_count=1` 且未填“强制包含”时会按
+> `(艺术家, 权重)` 组合逐个不重复输出的玩法，以及配套的 `mode` 参数、
+> `remaining_count` 输出与组合池表）。因此：
+
+- `artist_count=1` 现在就是普通的**随机抽 1 个**，不会再出现 `ALL_COMBINATIONS_TESTED`
+- `dedup_mode` 与 `weight_total` 在所有情况下都生效
+- 打开旧数据库时，遗留的 `exact_pool` / `pool_meta` 两张表会被自动删除
 
 ## 记录数据库（SQLite）
 
 - 默认数据库位于节点目录：`rollingartist.sqlite`（含 `-wal` / `-shm` 附带文件）。
 - **每次启动 ComfyUI 会自动清理默认数据库**（由 `prestartup_script.py` 完成），保持每次运行干净；
-  想要跨会话接着去重 / 穷举，请把 `tested_db_path` 指到自己的文件（该路径不会被清理）。
+  想要跨会话接着去重，请把 `tested_db_path` 指到自己的文件（该路径不会被清理）。
 - 「判重 → 生成 → 记录」处于同一个数据库事务中，进程内多线程、**多开 ComfyUI 或多进程**都不会产生重复组合。
 - 判重走索引查询，历史再大也不占内存；艺术家名里含 `|`、`:`、逗号也不会串行。
 - 记录条数没有上限，也不会自动裁剪；默认路径每次启动会被清空。

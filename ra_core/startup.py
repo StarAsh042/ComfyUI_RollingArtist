@@ -18,9 +18,14 @@ import os
 from typing import List
 
 from .constants import DEFAULT_CHARACTER_DB, DEFAULT_DB, DEFAULT_TESTED_CSV, LOGGER
-from .exact import remaining_path_for
 
 __all__ = ["default_runtime_files", "cleanup_default_runtime_files"]
+
+
+def _legacy_remaining_path(tested_path: str) -> str:
+    """由旧版已测 CSV 路径派生 ``*_remaining.csv`` 路径（仅用于清理历史残留）。"""
+    base, extension = os.path.splitext(tested_path)
+    return f"{base}_remaining{extension or '.csv'}"
 
 
 def default_runtime_files() -> List[str]:
@@ -28,7 +33,7 @@ def default_runtime_files() -> List[str]:
     files: List[str] = []
     for db_path in (DEFAULT_DB, DEFAULT_CHARACTER_DB):
         files.extend([db_path, f"{db_path}-wal", f"{db_path}-shm"])
-    files.extend([DEFAULT_TESTED_CSV, remaining_path_for(DEFAULT_TESTED_CSV)])
+    files.extend([DEFAULT_TESTED_CSV, _legacy_remaining_path(DEFAULT_TESTED_CSV)])
     return files
 
 

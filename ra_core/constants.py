@@ -12,9 +12,9 @@ from typing import Final
 NODE_DIR: Final[str] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_ARTIST_CSV: Final[str] = os.path.join(NODE_DIR, "danbooru_art_001.csv")
 DEFAULT_CHARACTER_CSV: Final[str] = os.path.join(NODE_DIR, "danbooru_character_001.csv")
-# 4.0.0 起记录与组合池统一存进 SQLite；该常量保留用于兼容旧版 CSV 记录文件
+# 4.0.0 起记录统一存进 SQLite；该常量保留用于兼容旧版 CSV 记录文件
 DEFAULT_TESTED_CSV: Final[str] = os.path.join(NODE_DIR, "tested_combinations.csv")
-# 默认数据库：同时承载「已测记录」与「穷举剩余组合池」
+# 默认数据库：承载已测记录
 DEFAULT_DB: Final[str] = os.path.join(NODE_DIR, "rollingartist.sqlite")
 # 角色节点的默认数据库：与画师分开，互不干扰
 DEFAULT_CHARACTER_DB: Final[str] = os.path.join(NODE_DIR, "rollingcharacter.sqlite")
@@ -25,19 +25,11 @@ KIND_CHARACTER: Final[str] = "character"
 # 旧版 CSV 记录文件在导入数据库后改名留底用的后缀
 LEGACY_BACKUP_SUFFIX: Final[str] = ".bak"
 
-# 权重枚举步长（Exact 模式与界面 step 保持一致）
+# 权重步长（与节点界面的 step 保持一致）
 WEIGHT_STEP: Final[float] = 0.1
 # 权重保留的小数位数 / 整数化因子，用整数单位运算避免浮点累计误差
 WEIGHT_DECIMALS: Final[int] = 1
 WEIGHT_SCALE: Final[int] = 10 ** WEIGHT_DECIMALS
-
-# Exact 模式：组合数超过该值时给出提示（不阻断）
-EXACT_COMBOS_WARN: Final[int] = 100000
-# Exact 模式：组合数超过该值时不再物化组合池，改为随机采样 + 去重
-EXACT_COMBOS_LIMIT: Final[int] = 1000000
-# 组合池最多同时保留几套（按最近构建时间淘汰）：换配置会产生新池，
-# 保留少量以免数据库无限膨胀，同时避免多套配置互相覆盖对方的进度
-EXACT_POOL_KEEP: Final[int] = 4
 
 # CSV 读取使用 utf-8-sig，自动兼容带 BOM 的文件；写入统一使用 utf-8
 CSV_READ_ENCODING: Final[str] = "utf-8-sig"

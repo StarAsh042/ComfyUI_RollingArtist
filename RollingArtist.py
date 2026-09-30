@@ -21,20 +21,16 @@ from .ra_core.artists import (
     split_names,
 )
 from .ra_core.constants import (
-    EXACT_COMBOS_WARN,
     KIND_ARTIST,
     LOGGER,
     WEIGHT_STEP,
 )
-from .ra_core.db import RollingArtistDB, get_db
-from .ra_core.exact import remaining_count, take_exact
+from .ra_core.db import get_db
 from .ra_core.params import as_bool, as_float, as_int, as_text
 from .ra_core.weights import (
     build_prompt,
     generate_weights,
     normalize_dedup_mode,
-    normalize_generation_mode,
-    weight_grid,
 )
 
 # 兼容旧版本从本模块导入常量的用法
@@ -43,11 +39,9 @@ __all__ = [
     "NODE_CLASS_MAPPINGS",
     "NODE_DISPLAY_NAME_MAPPINGS",
     "WEIGHT_STEP",
-    "EXACT_COMBOS_WARN",
 ]
 
 _STATUS_OK = "OK"
-_STATUS_ALL_TESTED = "ALL_COMBINATIONS_TESTED"
 
 
 # 参数容错转换与 RollingCharacter 共用一份实现（见 ra_core/params.py）
@@ -58,50 +52,6 @@ _as_bool = as_bool
 _text = _as_text
 
 
-# Exact 模式“忽略 dedup_mode / weight_total”的提示按配置去重，避免批量执行时刷屏
-_exact_notices: Set[str] = set()
-
-
-def _resolve_exact_mode(mode: Any, artist_count: int, force_list: List[str]) -> bool:
-    """判断本次是否进入穷举模式。
-
-    - ``auto``：保持 3.2.x 行为（艺术家数量为 1 且未填强制包含时穷举）
-    - ``random``：永不穷举
-    - ``exact``：强制穷举，条件不满足时**直接报错**（不静默降级，避免用户以为在穷举）
-    """
-    resolved = normalize_generation_mode(mode)
-    if resolved == "random":
-        return False
-    if resolved == "exact":
-        if artist_count != 1:
-            raise ValueError(
-                "[RollingArtist] mode=exact（穷举）要求 artist_count = 1，"
-                f"当前 artist_count = {artist_count}。穷举池按「单个艺术家 × 权重档位」枚举，"
-                "多艺术家组合数量会爆炸，因此不支持。"
-            )
-        if force_list:
-            raise ValueError(
-                "[RollingArtist] mode=exact（穷举）与 force_include（强制包含）不能同时使用："
-                "强制包含会固定组合，无法穷举。请清空强制包含，或把模式改回 auto/random。"
-            )
-        return True
-    return artist_count == 1 and not force_list
-
-
-def _notify_exact_mode(mode: str, raw_dedup_mode: Any, weight_total: float) -> None:
-    """提示 Exact 模式固定按 full_prompt 去重且不使用 weight_total（同配置只提示一次）。"""
-    key = f"{mode}|{weight_total!r}"
-    if key in _exact_notices:
-        return
-    _exact_notices.add(key)
-    if mode != "full_prompt" or weight_total != 0.0:
-        LOGGER.info(
-            "[RollingArtist] artist_count=1 进入 Exact 穷举模式：dedup_mode=%r 与 weight_total=%r "
-            "不生效（固定按 full_prompt 去重，权重按 weight_min~weight_max 网格枚举）",
-            raw_dedup_mode, weight_total,
-        )
-
-
 class RollingArtist:
     """RollingArtist 节点类。
 
@@ -109,14 +59,17 @@ class RollingArtist:
     - 支持从 CSV 加载艺术家列表，自动识别表头与列，可自定义路径
     - 支持 Top 艺术家优先池、排除名单、强制包含名单
     - 权重范围与总和双约束（步长 0.1，总和精确且不会越界）
-    - 支持 4 种去重模式，以及 artist_count=1 时的 Exact 穷举模式
+    - 支持 4 种去重模式
     - 结构化输出 artists_json，便于下游处理
 
     线程安全：
     - 艺术家 CSV 解析结果按文件签名缓存，多个实例共享
-    - 去重记录与 Exact 组合池都存在 SQLite（``tested_db_path``）里，
+    - 去重记录存在 SQLite（``tested_db_path``）里，
       “判重 -> 生成 -> 记录”整段运行在同一个 ``BEGIN IMMEDIATE`` 事务中：
       进程内（可重入锁）与跨进程（SQLite 文件锁）都不会生成重复组合
+
+    说明：4.1.0 起删除了"穷举模式"（把 (艺术家, 权重) 组合逐个不重复输出的玩法），
+    ``artist_count=1`` 现在就是普通的随机抽 1 个。
     """
 
     @classmethod
@@ -150,9 +103,7 @@ class RollingArtist:
                     "max": 10,
                     "step": 1,
                     "display": "slider",
-                    "tooltip": "每次生成的艺术家数量（1-10）。在“模式=自动”下，设为 1 且“强制包含”为空"
-                               "会进入穷举模式：按 (艺术家, 权重) 组合逐个不重复输出，"
-                               "穷举完返回 ALL_COMBINATIONS_TESTED。想只抽 1 个而不穷举请把“模式”改为普通"
+                    "tooltip": "每次生成的艺术家数量（1-10），设为 1 就是随机抽 1 个"
                 }),
                 "artist_top_ratio": ("FLOAT", {
                     "default": 0.01,
@@ -195,15 +146,14 @@ class RollingArtist:
                     "max": 20.0,
                     "step": 0.5,
                     "display": "slider",
-                    "tooltip": "所有权重之和（步长 0.5），按总和精确分配，超出可行区间时夹到边界；"
-                               "artist_count=1 的 Exact 模式不生效（改为按 0.1 网格枚举单个权重）"
+                    "tooltip": "所有权重之和（步长 0.5），按总和精确分配，超出可行区间时夹到边界"
                 }),
                 "weight_curve": (["flat", "dominant", "ramp"], {
                     "default": "flat",
                     "tooltip": "权重分配曲线，只影响“谁分得多”，不影响上下限与总和。"
                                "flat=平坦（现状，各位权重接近，风格平均混合）；"
                                "dominant=主次分明（随机一位当主风格，权重明显更高）；"
-                               "ramp=阶梯（按随机名次递减）。穷举模式按权重网格枚举，本项不生效"
+                               "ramp=阶梯（按随机名次递减）"
                 }),
                 # ---------------- 输出形式与随机性 ----------------
                 "artists_prefix": ("BOOLEAN", {
@@ -240,18 +190,12 @@ class RollingArtist:
                     "tooltip": "必须出现的艺术家名，英文逗号分隔；优先级高于“排除艺术家”，"
                                "数量达到 artist_count 时直接从中随机抽取"
                 }),
-                # ---------------- 生成模式与去重 ----------------
-                "mode": (["auto", "random", "exact"], {
-                    "default": "auto",
-                    "tooltip": "生成模式。auto=保持旧行为（艺术家数量=1 且未填“强制包含”时进入穷举）；"
-                               "random=永远随机抽取；exact=强制穷举（要求艺术家数量=1 且未填“强制包含”，"
-                               "不满足时直接报错）。穷举模式下 dedup_mode 与 weight_total 不生效"
-                }),
+                # ---------------- 去重 ----------------
                 "dedup_mode": (["none", "full_prompt", "artist_set", "artist_list"], {
                     "default": "none",
                     "tooltip": "去重依据：none=只记录不判重；full_prompt=艺术家顺序与权重完全一致；"
                                "artist_set=艺术家集合一致（忽略顺序与权重）；"
-                               "artist_list=排序后的名字一致（忽略权重）。Exact 模式固定按 full_prompt 判定"
+                               "artist_list=排序后的名字一致（忽略权重）"
                 }),
                 "max_attempts": ("INT", {
                     "default": 10,
@@ -271,24 +215,23 @@ class RollingArtist:
                     "default": "",
                     "advanced": True,
                     "tooltip": "记录数据库（SQLite）路径；留空使用节点目录下的 rollingartist.sqlite。"
-                               "已测记录与穷举组合池都存这里，更换该路径相当于重置去重进度。"
+                               "已测记录存在这里，更换该路径相当于重置去重进度。"
                                "默认路径的数据库每次启动会被清理，要跨会话保留请显式指定"
                 }),
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "INT", "INT")
-    RETURN_NAMES = ("prompt", "artists_json", "tested_count", "remaining_count")
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("prompt", "artists_json", "tested_count")
     FUNCTION = "generate_artists"
     CATEGORY = "RollingArtist"
     # 与原实现保持一致：作为输出节点，即使输出未被下游使用也会执行
     OUTPUT_NODE = True
     DESCRIPTION = "从艺术家 CSV 中随机抽取艺术家并分配随机权重，生成带权重的提示词，并输出结构化 JSON。"
     OUTPUT_TOOLTIPS = (
-        "生成的提示词",
+        "生成的提示词；末尾总是带一个逗号，便于直接拼接角色节点的多行输出",
         "结构化结果 JSON（艺术家 / 权重 / 是否 Top / 状态）",
-        "当前数据库里已记录的组合数量",
-        "穷举模式下组合池里还剩多少条组合；非穷举模式（含总量过大而降级采样时）恒为 0",
+        "当前数据库里已记录的组合数量（字符串形式，可直接接到文本节点查看）",
     )
 
     def __init__(self) -> None:
@@ -353,25 +296,22 @@ class RollingArtist:
                          sort_by_weight: bool = True, use_top_priority: bool = True,
                          force_include: str = "", dedup_mode: str = "none",
                          max_attempts: int = 10,
-                         mode: str = "auto",
                          weight_curve: str = "flat",
-                         tested_db_path: str = "") -> Tuple[str, str, int, int]:
+                         tested_db_path: str = "") -> Tuple[str, str, str]:
         """生成艺术家提示词。
 
         形参顺序是给外部脚本按位置调用的接口（与 ``INPUT_TYPES`` 的界面顺序无关，
         ComfyUI 按关键字传参）。
 
         参数:
-            mode: 生成模式。``auto`` = 艺术家数量为 1 且未填强制包含时穷举（旧行为）；
-                  ``random`` = 永不穷举；``exact`` = 强制穷举（条件不满足时抛错）。
-                  判定逻辑见 ``_resolve_exact_mode``
             tested_db_path: 记录数据库路径（空 = 节点目录下的 rollingartist.sqlite）
 
         读取的 CSV 列固定为 ``trigger``（提示词可直接使用的列：空格与括号已转义），不可配置；
         CSV 里没有该列时回退到首列并记 WARNING。
 
         返回:
-            ``(prompt, artists_json, tested_count, remaining_count)``
+            ``(prompt, artists_json, tested_count)``；``tested_count`` 是字符串，
+            方便直接接到文本节点查看
         """
         count = _as_int(artist_count, 1)
         if count < 1:
@@ -408,24 +348,11 @@ class RollingArtist:
         low = _as_float(weight_min, 0.2)
         high = _as_float(weight_max, 1.0)
         total = _as_float(weight_total, 2.0)
-        grid = weight_grid(low, high)
-        use_exact = _resolve_exact_mode(mode, count, force_list)
 
-        # 3) 记录库：SQLite（已测记录 + 穷举组合池）
+        # 3) 记录库：SQLite（已测记录）
         db = get_db(tested_db_path)
 
-        # 4) 穷举模式：穷举 (艺术家, 权重)，穷举完之前绝不重复
-        #    该模式固定使用 full_prompt 去重键，不参与 weight_total 分配（按权重网格枚举单权重）
-        if use_exact:
-            _notify_exact_mode(dedup, dedup_mode, total)
-            prompt, payload_json = self._generate_exact(
-                db, candidates, artists, top_count,
-                rng_seed, grid, prefix, attempts,
-            )
-            return (prompt, payload_json, db.count(KIND_ARTIST),
-                    remaining_count(db, candidates, grid, KIND_ARTIST))
-
-        # 5) 常规模式：整段生成处于同一个事务内，进程内 / 跨进程都不会产生重复组合
+        # 4) 整段生成处于同一个事务内，进程内 / 跨进程都不会产生重复组合
         with db.generation_lock():
             last_result: Optional[Tuple[List[str], List[float], str]] = None
 
@@ -476,41 +403,11 @@ class RollingArtist:
                 )
 
         payload = self._build_payload(selected, weights, artists, top_count)
-        # 常规模式没有组合池，「剩余」不适用，固定输出 0
-        return prompt, json.dumps(payload, ensure_ascii=False), db.count(KIND_ARTIST), 0
+        return prompt, json.dumps(payload, ensure_ascii=False), str(db.count(KIND_ARTIST))
 
     # ------------------------------------------------------------------
     # 内部实现
     # ------------------------------------------------------------------
-    def _generate_exact(self, db: RollingArtistDB, candidates: List[str], artists: List[str],
-                        top_count: int, rng_seed: int, grid: List[float],
-                        prefix: str, attempts: int) -> Tuple[str, str]:
-        """穷举模式：每次返回一个未测过的 ``(艺术家, 权重)`` 组合。
-
-        全部穷举后返回 ``("ALL_COMBINATIONS_TESTED", json)``。
-        """
-        with db.generation_lock():
-            rng = random.Random(rng_seed)
-            combo = take_exact(db, rng, candidates, grid, attempts, KIND_ARTIST)
-            if combo is None:
-                LOGGER.warning(
-                    "[RollingArtist] 组合已穷举完(%s)，prompt 返回 %s",
-                    db.path, _STATUS_ALL_TESTED,
-                )
-                payload = {"status": _STATUS_ALL_TESTED, "artists": []}
-                return _STATUS_ALL_TESTED, json.dumps(payload, ensure_ascii=False)
-
-            artist, weight = combo
-            prompt = build_prompt([artist], [weight], prefix)
-            if not db.record([artist], [weight], prompt, KIND_ARTIST):
-                LOGGER.error(
-                    "[RollingArtist] 已测记录写入数据库失败(%s)，该组合可能被再次发出: %s",
-                    db.path, prompt,
-                )
-
-        payload = self._build_payload([artist], [weight], artists, top_count)
-        return prompt, json.dumps(payload, ensure_ascii=False)
-
     @staticmethod
     def _build_payload(selected: List[str], weights: List[float],
                        artists: List[str], top_count: int) -> Dict[str, Any]:

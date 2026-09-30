@@ -5,7 +5,7 @@
     "inputs": {
       "artist_count": {
         "name": "Artist Count",
-        "tooltip": "Number of artists generated per run (1-10). With Mode = auto, setting this to 1 while Force Include is empty enters Exact mode: it enumerates (artist, weight) combinations without repetition and returns ALL_COMBINATIONS_TESTED once every combination has been used. To draw a single artist without exhausting, set Mode = random."
+        "tooltip": "Number of artists generated per run (1-10). Setting it to 1 simply draws one artist at random."
       },
       "artist_top_ratio": {
         "name": "Top Pool Ratio",
@@ -25,11 +25,11 @@
       },
       "weight_total": {
         "name": "Weight Total",
-        "tooltip": "Sum of all weights (step 0.5), distributed exactly; clamped to the feasible range when out of bounds. Not used in Exact mode, where weights are enumerated on a 0.1 grid instead."
+        "tooltip": "Sum of all weights (step 0.5), distributed exactly; clamped to the feasible range when out of bounds."
       },
       "weight_curve": {
         "name": "Weight Curve",
-        "tooltip": "Controls who gets more weight only; bounds and total are unaffected. flat = even (current behaviour, similar weights, styles blend evenly); dominant = one random artist clearly dominates; ramp = descending ladder over a random order. Not used in Exact mode."
+        "tooltip": "Controls who gets more weight only; bounds and total are unaffected. flat = even (current behaviour, similar weights, styles blend evenly); dominant = one random artist clearly dominates; ramp = descending ladder over a random order."
       },
       "artists_prefix": {
         "name": "artist: Prefix",
@@ -55,13 +55,9 @@
         "name": "Force Include",
         "tooltip": "Artist names that must appear, comma separated. Takes priority over Exclude Artists; when their count reaches Artist Count the result is drawn from this list."
       },
-      "mode": {
-        "name": "Mode",
-        "tooltip": "Generation mode. auto = previous behaviour (Artist Count = 1 with an empty Force Include enters Exact mode); random = never exhaust; exact = force Exact mode (requires Artist Count = 1 and an empty Force Include, otherwise the node errors out). Dedup mode and Weight Total do not apply in Exact mode."
-      },
       "dedup_mode": {
         "name": "Dedup Mode",
-        "tooltip": "Dedup key: none = record only, no duplicate check; full_prompt = same artist order and weights; artist_set = same artist set (order and weights ignored); artist_list = same sorted names (weights ignored). Exact mode always uses full_prompt."
+        "tooltip": "Dedup key: none = record only, no duplicate check; full_prompt = same artist order and weights; artist_set = same artist set (order and weights ignored); artist_list = same sorted names (weights ignored)."
       },
       "max_attempts": {
         "name": "Max Attempts",
@@ -73,7 +69,7 @@
       },
       "tested_db_path": {
         "name": "Records DB Path",
-        "tooltip": "Path of the SQLite records database; leave empty to use rollingartist.sqlite in the node directory. Both tested records and the Exact-mode combination pool live here, so changing the path resets dedup progress. The database at the default path is cleared on every startup; set an explicit path to keep it across sessions."
+        "tooltip": "Path of the SQLite records database; leave empty to use rollingartist.sqlite in the node directory. Tested records live here, so changing the path resets dedup progress. The database at the default path is cleared on every startup; set an explicit path to keep it across sessions."
       }
     },
     "outputs": {
@@ -87,17 +83,13 @@
       },
       "2": {
         "name": "Tested Count",
-        "tooltip": "Number of combinations recorded in the current database."
-      },
-      "3": {
-        "name": "Remaining Count",
-        "tooltip": "Combinations left in the pool in Exact mode; always 0 outside Exact mode (including when a huge universe falls back to random sampling)."
+        "tooltip": "Number of combinations recorded in the current database (as a string, so it can be wired straight into a text node)."
       }
     }
   },
   "RollingCharacter": {
     "display_name": "Rolling Character",
-    "description": "Randomly draws characters from a character CSV and outputs one line per character as \"character tag, copyright tag, core_tags\" (newline separated), plus a structured JSON result and the tested count.",
+    "description": "Randomly draws characters from a character CSV and outputs one line per character as \"character tag, copyright tag, character description\" (comma + newline separated), plus a structured JSON result and the tested count.",
     "inputs": {
       "character_count": {
         "name": "Character Count",
@@ -105,7 +97,7 @@
       },
       "character_top_ratio": {
         "name": "Top Pool Ratio",
-        "tooltip": "Top pool ratio (0.01-1.0): the first ceil(candidates × ratio) rows of the CSV (at least 1) form the Top pool; earlier rows have more works. Candidates are the characters left after Copyright Filter."
+        "tooltip": "Top pool ratio (0.01-1.0): the first ceil(candidates × ratio) rows of the CSV (at least 1) form the Top pool; earlier rows have more works. Candidates are the characters left after the work filter."
       },
       "character_top_count": {
         "name": "Top Pick Count",
@@ -113,7 +105,7 @@
       },
       "seed": {
         "name": "Seed",
-        "tooltip": "Random seed. The same seed with the same settings is reproducible; dedup mode and max attempts change the actual sampling sequence."
+        "tooltip": "Random seed. The same seed with the same settings is reproducible; the \"no repeat within the last 10 outputs\" window also affects the actual result."
       },
       "use_top_priority": {
         "name": "Top Priority",
@@ -125,23 +117,15 @@
       },
       "force_include": {
         "name": "Force Include",
-        "tooltip": "Character names that must appear, comma separated. Takes priority over Exclude Characters; when their count reaches Character Count the result is drawn from this list. Names that are not in the CSV still work, but carry no copyright or appearance tags."
+        "tooltip": "Character names that must appear, comma separated. Takes priority over Exclude Characters; when their count reaches Character Count the result is drawn from this list. Names that are not in the CSV still work, but carry no copyright or character description."
       },
-      "copyright_filter": {
-        "name": "Copyright Filter",
-        "tooltip": "Only draw characters from these works, comma separated (for example touhou,vocaloid); empty means no limit. Accepts both the raw copyright form fate_(series) and the escaped trigger form fate_\\(series\\), case-insensitively. Errors out when nothing is left after filtering."
+      "copyright_pick": {
+        "name": "Work",
+        "tooltip": "Pick one work from the dropdown. The list holds every work in the CSV (about 3460 with the default data, sorted by popularity: the `count` column summed over the work's characters, descending) and is searchable as you type, case-insensitively (typing \"a\" keeps works starting with a, typing \"ab\" narrows it further). \"(不限)\" means no filtering. Both the raw copyright form fate_(series) and the escaped trigger form fate_\\(series\\) are accepted. Note: the list comes from the default CSV and does not follow a custom CSV path."
       },
-      "include_core_tags": {
-        "name": "Include Appearance Tags",
-        "tooltip": "Whether to append each character's fixed appearance tags (core_tags) to its line. On: \"character tag, copyright tag, core_tags\"; off: \"character tag, copyright tag\"."
-      },
-      "dedup_mode": {
-        "name": "Dedup Mode",
-        "tooltip": "Dedup key: none = record only; full_prompt = same character order and weights; artist_set = same character set (order and weights ignored); artist_list = same sorted names (weights ignored)."
-      },
-      "max_attempts": {
-        "name": "Max Attempts",
-        "tooltip": "Maximum retries in dedup mode (1-100). If every retry hits an already-tested combination, the last result is accepted and a WARNING is logged."
+      "describe_character": {
+        "name": "Enable Character Description",
+        "tooltip": "When on, appends each character's fixed appearance tags (core_tags, i.e. the character description) to its line: \"character tag, copyright tag, character description\"; when off, only \"character tag, copyright tag\" is output."
       },
       "custom_csv_path": {
         "name": "Custom CSV Path",
@@ -149,21 +133,21 @@
       },
       "tested_db_path": {
         "name": "Records DB Path",
-        "tooltip": "Path of the SQLite records database; leave empty for rollingcharacter.sqlite in the node directory (separate from the artist node). Changing the path resets dedup progress."
+        "tooltip": "Path of the SQLite records database; leave empty for rollingcharacter.sqlite in the node directory (separate from the artist node). It only stores the output history, so changing the path does not reset the \"no repeat within the last 10 outputs\" window (that window lives in memory and is cleared on restart)."
       }
     },
     "outputs": {
       "0": {
         "name": "Character List",
-        "tooltip": "One line per character in the form \"character tag, copyright tag, core_tags\", with no weights. With \"Include Appearance Tags\" turned off it becomes \"character tag, copyright tag\"."
+        "tooltip": "One line per character in the form \"character tag, copyright tag, character description\", with no weights. With \"Enable Character Description\" turned off it becomes \"character tag, copyright tag\". Multiple characters are separated by a comma plus a newline (each line ends with a comma)."
       },
       "1": {
         "name": "Characters JSON",
-        "tooltip": "Structured result JSON (character / copyright / top flag / count / appearance tags)."
+        "tooltip": "Structured result JSON (character / copyright / top flag / count / character description)."
       },
       "2": {
         "name": "Tested Count",
-        "tooltip": "Number of character combinations recorded in the current database."
+        "tooltip": "Number of character combinations recorded in the current database (as a string, so it can be wired straight into a text node)."
       }
     }
   }

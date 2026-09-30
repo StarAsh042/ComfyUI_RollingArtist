@@ -3,131 +3,111 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [4.1.0] - 2026-10-01
 
-暂无。
-
-## [4.0.0] - 2026-09-30
-
-**破坏性版本**：记录存储从 CSV 迁移到 SQLite，新增 RollingCharacter（滚动角色）节点、
-生成模式与权重分配曲线，并精简了参数面（删除了 4 个输入与 1 个输出）。
-（本版本开发期间曾用 3.3.0 编号，正式发布统一为 4.0.0。）
+**破坏性版本**：删除穷举模式（画师输出 4 → 3、输入 18 → 17）；角色节点删除手输作品过滤与全部去重参数、
+作品下拉改为全量、`include_core_tags` 更名为 `describe_character`（角色输入 13 → 11）。
 
 ### 新增
 
-- **`mode` 参数（自动 / 普通 / 穷举）**：穷举模式不再只能靠「艺术家数量 = 1」隐式触发。
-  `auto` 保持旧行为，`random` 永不穷举（想只抽 1 个艺术家时用），
-  `exact` 强制穷举——条件不满足时直接报错，不会静默降级成普通模式
-- **`weight_curve` 参数（flat / dominant / ramp）**：控制权重的分配倾向。
-  `flat` 是原来的平均分配；`dominant` 让随机一位艺术家明显占主导（主风格 + 弱参考）；
-  `ramp` 按随机名次递减。三种曲线都仍严格满足权重的上下限与总和约束
-- **两个进度输出**：`tested_count`（已测组合数）与 `remaining_count`（穷举池剩余数），
-  穷举模式下不用再翻日志确认还剩多少
-- **`tested_db_path` 参数**：记录数据库（SQLite）路径
-- **新增节点 `RollingCharacter`（滚动角色）**：与画师节点共用同一套抽样、去重与记录机制，
-  处理角色数据（`danbooru_character_001.csv`）：
-  - **输出不带权重**，每个角色一行：`角色标签,作品标签,core_tags`，多个角色换行分隔，
-    空的部分自动省略，外观标签在行内去重
-  - `include_core_tags` 开关控制是否把外观标签拼进每一行（关闭后为 `角色标签,作品标签`）
-  - **trigger 列拆解**：该列经 34,416 行全量校验是恒定的「角色标签,作品标签」两段结构
-    （第 1 段 == 转义后的 `character` 列、第 2 段 == 转义后的 `copyright` 列，均 100%）
-  - **作品过滤** `copyright_filter`：只从指定作品抽角色，同时接受原始写法与转义写法
-  - `character_count` 默认 1；3 个输出：`prompt` / `characters_json` / `tested_count`
-  - 不做权重分配（因此没有权重与曲线参数、也没有排序参数）、不做穷举、读取列固定为 `trigger`、
-    输出格式固定（因此没有前缀与列参数），共 12 个参数
-- **新增共享模块** `ra_core/characters.py`（角色解析）与 `ra_core/params.py`（入参容错转换）
-- **记录类型隔离**：`tested` 表新增 `kind` 列（复合唯一索引），
-  两个节点即使指向同一个数据库也不会互相冒充；没有 `kind` 列的旧库在打开时会自动补列升级
-- **数据加工脚本重写**：`modify_danbooru_art.py` 从「就地规范化任意 CSV」改为
-  「把 danbooru 导出文件加工成节点可直接使用的精简 CSV」——按 `count` 阈值筛选、
-  只保留 `artist,trigger,count` 三列、只对 `trigger` 列做转义、
-  默认 `danbooru_art_full.csv` → `danbooru_art_001.csv` 并自动备份为 `danbooru_art_001.bak`
-- **新增角色数据加工脚本** `modify_danbooru_character.py`：
-  `danbooru_character.csv` → `danbooru_character_001.csv`，只保留
-  `character,copyright,trigger,core_tags,count` 五列，只对 `trigger` 列转义，源文件不被覆盖
-- **新增共享实现模块** `danbooru_csv_tool.py`：两个加工脚本共用同一份
-  筛选 / 列裁剪 / 转义 / 备份 / 原子写回实现，避免转义规则出现两份拷贝；
-  重构后画师脚本的产出经 MD5 比对**逐字节未变**
-- **测试**：新增 `tests/`（pytest），覆盖纯逻辑、节点层冒烟、加工脚本、
-  以及用两个真实子进程验证的跨进程去重
+- **`RollingCharacter.copyright_pick` 作品下拉**：列出 CSV 里的全部作品（默认 3,460 个），
+  按**作品热度**降序（该作品下所有角色的 `count` 之和）；首项 `(不限)`，可打字筛选、忽略大小写
+- **角色节点的「最近 10 条输出记录内不重复」**：用一个内存窗口（每条 = 一次生成）替换原来的 4 种去重模式；
+  窗口把候选全部吃掉时退回「允许重复」并打 WARNING 日志。`node.reset_recent()` / `node.recent_names()`
+  可手动清空与查看
 
 ### 变更
 
-- **记录存储改为 SQLite**：一个数据库文件同时承载「已测记录」与「穷举剩余组合池」，
-  取代 `tested_combinations.csv` 与 `*_remaining.csv`。带来四点直接变化：
-  - 判重是索引查询（`O(log n)`），不再把全部历史读进内存；
-    旧实现还会因为记录里含引号而被迫**每次整体重读**，增量优化形同虚设
-  - 「判重 → 生成 → 记录」跑在同一个 `BEGIN IMMEDIATE` 事务里，**多开 ComfyUI 也不会重复出图**
-    （旧实现只有进程内的锁）
-  - 穷举模式每抽一条只删一行；旧实现会把剩余组合**整体重写**回磁盘
-  - 艺术家名与权重按 JSON 存列，名字里含 `|`、`:`、逗号时不再串行
-- **启动清理口径**：从「删两份 CSV」改为「删默认数据库（含 `-wal` / `-shm`）+ 兼容删除旧版两份 CSV」。
-  仍然只清理默认路径，显式指定 `tested_db_path` 的文件不会被碰
-- **删除 `RollingArtist.csv_column`**：CSV 取列**固定为 `trigger`**（已转义的列，可直接进提示词）；
-  CSV 里没有该列时回退到首列并记 WARNING。
-  3.0.0 的「展平所有列」（`all`）与 `auto` / 列序号 / 列名等写法随之不可用
-  （`auto` 的识别能力仍保留在 `ra_core.artists` 层，供外部脚本与测试使用）
-- **删除 `RollingArtist.tested_csv_path`**：旧版 CSV 记录的**界面导入入口取消**。
-  导入能力保留在 `ra_core.db.RollingArtistDB.import_legacy_csv()`，
-  需要保留历史时按 README「从 3.2.x 及更早版本升级」一节手动执行一次
+- **删除穷举模式**：`mode` 参数、`remaining_count` 输出与组合池一并移除
+  （`ra_core/exact.py`、`exact_pool` / `pool_meta` 表、`GENERATION_MODES` / `weight_grid` / `EXACT_*` 常量）。
+  `artist_count = 1` 现在就是随机抽 1 个，不会再返回 `ALL_COMBINATIONS_TESTED`；
+  打开旧数据库时会自动删掉遗留的两张组合池表
+- **画师提示词末尾总是补一个逗号**（即使只抽到 1 个艺术家），方便直接拼接角色节点的多行输出
+- **`tested_count` 输出由 `INT` 改为 `STRING`**（两个节点），可直接接到文本节点查看
+- **角色节点**：删除 `copyright_filter` / `dedup_mode` / `max_attempts`；
+  `include_core_tags` 更名为 `describe_character`（中文「开启角色描述」/ 英文 Enable Character Description）；
+  多角色输出改为「逗号 + 换行」分隔（行尾补逗号，最后一行不补）
+- **`dedup_mode` 补齐文档**：帮助页新增「去重模式详解」，README 同步
+
+### 兼容性
+
+- **输出从 4 个减为 3 个**（`prompt` / `artists_json` / `tested_count`）：
+  旧工作流里接在 `remaining_count` 上的连线会消失
+- **输入参数增删**：画师输入 18 → 17（删 `mode`），角色输入 13 → 11
+  （删 `copyright_filter` / `dedup_mode` / `max_attempts`，新增 `copyright_pick`，`include_core_tags` 改名）。
+  参数顺序有变化，旧工作流载入后请检查两个高级字段（`custom_csv_path` / `tested_db_path`）是否仍是期望的文件
+- 旧工作流里「拼入外观标签」的值会掉回默认（开启）：键名改了，保存的 `false` 不再被识别
+- 外部脚本需去掉 `generate_artists(..., mode=...)` 与
+  `generate_characters(..., dedup_mode=..., max_attempts=..., copyright_filter=..., include_core_tags=...)`
+
+## [4.0.0] - 2026-09-30
+
+**破坏性版本**：记录存储从 CSV 迁移到 SQLite，新增 RollingCharacter（滚动角色）节点与权重分配曲线，
+并精简了参数面（删除 4 个输入与 1 个输出）。
+
+### 新增
+
+- **`weight_curve` 参数**（`flat` / `dominant` / `ramp`）：控制权重的分配倾向，三种曲线都严格满足
+  权重的上下限与总和约束
+- **`tested_count` 输出**与 **`tested_db_path` 参数**：记录数据库（SQLite）路径
+- **新增节点 `RollingCharacter`（滚动角色）**：处理角色数据（`danbooru_character_001.csv`），
+  输出不带权重、每个角色一行 `角色标签,作品标签,core_tags`（外观标签在行内去重）；
+  支持作品过滤 `copyright_filter` 与 `include_core_tags` 开关；读取列固定为 `trigger`
+  （该列经 34,416 行全量校验是恒定的「角色标签,作品标签」两段结构）
+- **新增共享模块** `ra_core/characters.py`（角色解析）与 `ra_core/params.py`（入参容错转换）
+- **记录类型隔离**：`tested` 表新增 `kind` 列，两个节点指向同一个数据库也不会互相冒充
+- **数据加工脚本重写**：`modify_danbooru_art.py` 与新增的 `modify_danbooru_character.py` 把 danbooru
+  导出文件裁成 `artist,trigger,count` / `character,copyright,trigger,core_tags,count`，
+  共用 `danbooru_csv_tool.py` 里的筛选 / 列裁剪 / 转义 / 备份 / 原子写回实现
+- **测试**：新增 `tests/`（pytest），覆盖纯逻辑、节点层冒烟、加工脚本，以及用两个真实子进程
+  验证的跨进程去重
+
+### 变更
+
+- **记录存储改为 SQLite**：一个数据库文件承载「已测记录」与「穷举剩余组合池」，
+  取代 `tested_combinations.csv` 与 `*_remaining.csv`。判重变成索引查询、不再把全部历史读进内存；
+  「判重 → 生成 → 记录」跑在同一个 `BEGIN IMMEDIATE` 事务里，多开 ComfyUI 也不会重复出图
+- **启动清理口径**：改为「删默认数据库（含 `-wal` / `-shm`）+ 兼容删除旧版两份 CSV」，
+  仍然只清理默认路径
+- **删除 `RollingArtist.csv_column`**：取列**固定为 `trigger`**（已转义、可直接进提示词），
+  没有该列时回退首列并记 WARNING
+- **删除 `RollingArtist.tested_csv_path`**：旧记录的**界面导入入口取消**；导入能力保留在
+  `RollingArtistDB.import_legacy_csv()`，需要时手动执行一次：
+
+  ```bash
+  python -c "from ra_core.db import RollingArtistDB; print(RollingArtistDB('rollingartist.sqlite').import_legacy_csv('tested_combinations.csv'))"
+  ```
+
 - **删除 `RollingCharacter.csv_column`**：角色读取列固定为 `trigger`
-- **删除 `RollingCharacter.core_tags` 输出**：输出从 4 个减为 3 个。
-  每个角色的 `core_tags` 仍保留在 `characters_json` 里，`include_core_tags` 开关照旧控制是否拼进 prompt
-- **删除 `ra_core.characters.format_core_tags()` / `collect_core_tags()`**：
-  随上面的输出口一起移除（已无调用方）；`unique_tags()` 仍保留，`build_character_prompt` 与
-  `build_payload` 都在用它
+- **删除 `RollingCharacter.core_tags` 输出**：输出从 4 个减为 3 个；`core_tags` 仍保留在
+  `characters_json` 里，`include_core_tags` 开关照旧控制是否拼进 prompt
 - **`RollingCharacter.character_count` 默认值 3 → 1**
-- **穷举组合池键**由「艺术家池 + 权重网格」派生：配置一改自动换新池，
-  不必再手动删除 `*_remaining.csv`；池最多保留 4 套，按最近构建时间淘汰
-- **不再删除 `EXACT_FILE_LIMIT_BYTES` 的 64MB 报错**：组合池进了数据库后，
-  原先「遗留清单超过 64MB 就直接报错让人手删」的问题不复存在
-- 组合池构建的差集计算改在 SQL 里完成，不再把上百万条组合物化成 Python 列表
-- **`auto` 取列的优先级调整**（`ra_core` 层能力）为 `character` → `trigger` → `artist` → `name`/`tag`：
-  `trigger` 是「提示词可直接使用」的列（空格与括号已转义）故优先于原始 `artist` 列；
-  `character` 仍排最前，因为它的 `trigger` 是「角色 + 作品」多标签串。
-  节点本身已改为固定读 `trigger`，不再经过这套识别
 - **默认 CSV 重新生成**：`danbooru_art_001.csv` 从「1,725 行单列」变为
   「`count >= 30` 的 50,018 行，`artist,trigger,count` 三列带表头」
-- 参数说明与帮助文档同步更新；README 增加「CSV 取列规则」与「数据安全与路径提醒」两节
-- 变更记录（原 README 的「升级说明」）移入本文件
 
 ### 修复
 
-- **加工脚本的转义规则改为「按逗号分段」**：原来对整串做替换，会把逗号后的空格也变成下划线，
-  产出 `hakurei_reimu,_touhou` 这类脏标签（角色文件 34,416 行**全部**中招）。
-  现在逐段整理：段内空白 / 短横线折叠为单个下划线、去掉首尾空白与短横线、丢弃空段。
-  同时修掉源数据里的同类脏写法：`95---` → `95`、`iwashi dorobou -r-` → `iwashi_dorobou_r`、
-  `kezune (i- -i)` → `kezune_\(i_i\)`、`grs-` → `grs`（画师文件 25 行）
-- 两个产出文件重新生成；「角色 / 画师列」等非转义列一字未动，行数与筛选结果完全一致
-- 旧记录导入的「新增条数」统计：`INSERT OR IGNORE` 被忽略时不再误报为新增
-- 穷举池已空且确认建过之后，不再每次执行都重算一遍全集
+- **加工脚本的转义规则改为「按逗号分段」**：原来会把逗号后的空格也变成下划线，
+  产出 `hakurei_reimu,_touhou` 这类脏标签（角色文件 34,416 行全部中招）；
+  顺带修掉 `95---`、`iwashi dorobou -r-`、`kezune (i- -i)`、`grs-` 等源数据脏写法
+- 旧记录导入的「新增条数」统计：被 `INSERT OR IGNORE` 忽略时不再误报为新增
 
 ### 兼容性
 
 - **输出从 2 个增加到 4 个**（`prompt` / `artists_json` / `tested_count` / `remaining_count`），
   新增的两个接在原有两个之后，旧工作流已有的连线不受影响
-- **输入参数增删**：画师节点新增 `mode`、`weight_curve`、`tested_db_path`，
-  删除 `csv_column`、`tested_csv_path`；角色节点删除 `csv_column`，共 12 个参数。
-  参数顺序随之变化，**旧工作流载入后请检查两个高级字段（`custom_csv_path` / `tested_db_path`）
-  是否为空**——按位置恢复时后面的值会顶到前面的参数上，必要时清空重设一次
-- **同 seed 的可复现性实测结果**（以 3.2.0 为基准）：
-  - 常规模式（`artist_count != 1`）：默认参数下同 seed 输出与 3.2.0 **完全一致**
-  - 穷举模式（`artist_count = 1`）：同 seed 取到的组合**与 3.2.0 不同**——
-    组合池的排列来源从「文件行序」改成了「按艺术家名 + 权重排序」，属于预期变化
-- **默认数据源换血**：默认 CSV 从 1,725 个名字变成 50,018 个 `count >= 30` 的名字，
-  因此**同一 seed 在默认配置下的输出会与旧版完全不同**；
-  想回到原来的列表，可从 `danbooru_art_001.bak`（脚本生成的备份）或 git 历史中取回
-- **取列固定为 `trigger`**：带 `artist` 与 `trigger` 两列的文件读 `trigger` 列（转义后的写法，
-  可直接进提示词）。实测在默认数据源下与之前的 `auto` 结果**完全一致**（50,018 个名字逐项相同，
-  同 seed 输出不变）；旧版单列 CSV 因为没有 `trigger` 表头会退回首列并记 WARNING
-- **`generate_artists` 的 Python 接口**：新增参数追加在末尾，删除了 `csv_column` 与 `tested_csv_path`
-  两个形参；返回值从 2 个变为 4 个，按位置解包的外部脚本需要相应调整
-- **`generate_characters` 的 Python 接口**：删除了 `csv_column` 形参；
-  返回值从 4 个变为 3 个（去掉 `core_tags`），按位置解包的外部脚本需要相应调整
+- **输入参数增删**：画师节点新增 `mode` / `weight_curve` / `tested_db_path`，删除 `csv_column` /
+  `tested_csv_path`；角色节点删除 `csv_column`。参数顺序随之变化，**旧工作流载入后请检查两个
+  高级字段（`custom_csv_path` / `tested_db_path`）是否为空**，必要时清空重设一次
+- **同 seed 的可复现性**（以 3.2.0 为基准）：常规模式输出与 3.2.0 完全一致；
+  穷举模式因组合池的排列来源改变而与 3.2.0 不同
+- **默认数据源换血**：默认 CSV 从 1,725 个名字变成 50,018 个，**同一 seed 的输出会与旧版完全不同**；
+  想回到原来的列表，可从 `danbooru_art_001.bak` 或 git 历史中取回
+- **取列固定为 `trigger`**：实测在默认数据源下与之前的 `auto` 结果完全一致（50,018 个名字逐项相同）
+- **Python 接口**：`generate_artists` 删除 `csv_column` / `tested_csv_path` 形参、返回值 2 → 4；
+  `generate_characters` 删除 `csv_column` 形参、返回值 4 → 3（去掉 `core_tags`）。
+  按位置解包的外部脚本需要相应调整
 - **不再写出 CSV 记录**：旧版 CSV 记录仍可被读取（仅用于导入），但节点不再产生新的 CSV
-- **有意未做的改动**（评估过但按需保留现状）：记录条数上限与自动裁剪、
-  采样不足时的 JSON 降级标记、参数非法时的严格模式、CSV 重名去重、
-  按热度加权抽样、同作品约束、输出模板、冷却期、一次生成多组、CSV 列下拉框
 
 ## [3.2.0] - 2026-09-29
 
@@ -157,7 +137,6 @@
 ## [3.1.0] - 2026-09-26
 
 一次以内核重构为主的版本，由提交 `c4164cc` 发布（连同此前的 `5051f9f`、`8b6161c`）。
-本文件是 3.2.0 才建立的，以下内容依据 git 提交历史事后补写。
 
 ### 新增
 
@@ -190,19 +169,18 @@
 
 ## [2.0.0] - 2025-02-09
 
-**没有功能变更**：该版本号提交（`9847a2d`）只改了 `pyproject.toml` 里的一行，
-没有配套的功能提交，也没留下变更说明（事后依据 git 历史补写）。
+**没有功能变更**：该版本号提交（`9847a2d`）只改了 `pyproject.toml` 里的一行。
 
 ## [1.0.0] - 2025-02-09
 
-首个发布版本（事后依据 git 历史补写）：
+首个发布版本：
 
 - **RollingArtist 节点上线**：从艺术家 CSV 随机抽人、分配随机权重，
   输出 `(artist:名称:权重)` 形式的提示词（`7850897`）
 - 许可证选用 **AGPL-3.0**（`1a55213`；3.1.0 时改为 MIT）
 - 补齐 `pyproject.toml` 与 ComfyUI Registry 发布工作流 `publish.yml`（`1fff5fa`）
 
-[未发布]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/9d9d5ba...HEAD
+[4.1.0]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/9d9d5ba...HEAD
 [4.0.0]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/aa58ad1...9d9d5ba
 [3.2.0]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/c4164cc...aa58ad1
 [3.1.0]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/08f5d4f...c4164cc
@@ -211,4 +189,4 @@
 [1.0.0]: https://github.com/StarAsh042/ComfyUI_RollingArtist/compare/9e37afd...1fff5fa
 
 <!-- 比较链接一律使用 commit SHA（不依赖 tag，避免 tag 未推送时变成死链）。
-     发新版时：把新发布提交的 SHA 填进“未发布”与上一版本的右端，并新增一行版本链接。 -->
+     发新版时：把新发布提交的 SHA 填进最新一版与上一版本的右端，并新增一行版本链接。 -->

@@ -7,32 +7,23 @@ import random
 import re
 from typing import Iterable, List, Optional, Sequence, Tuple
 
-from .constants import WEIGHT_SCALE, WEIGHT_STEP
+from .constants import WEIGHT_SCALE
 
 __all__ = [
     "DEDUP_MODES",
-    "GENERATION_MODES",
     "WEIGHT_CURVES",
     "generate_weights",
     "build_prompt",
     "parse_prompt",
     "parse_weight_list",
     "normalize_dedup_mode",
-    "normalize_generation_mode",
     "normalize_weight_curve",
     "escape_key_part",
     "dedup_key",
-    "weight_grid",
 ]
 
 # 去重模式：只有 none 之外的模式才需要读取已测记录
 DEDUP_MODES = ("none", "full_prompt", "artist_set", "artist_list")
-
-# 生成模式：
-# - auto   保持 3.2.x 行为（artist_count == 1 且未设置 force_include 时进入穷举）
-# - random 永不穷举
-# - exact  强制穷举（要求 artist_count == 1 且未设置 force_include）
-GENERATION_MODES = ("auto", "random", "exact")
 
 # 权重分配曲线（决定各艺术家权重是平均分配还是主次分明）：
 # - flat     现状：每位艺术家的随机倾向接近（0.5~1.5），风格平均混合
@@ -164,14 +155,20 @@ def generate_weights(count: int, weight_min: float, weight_max: float,
 def build_prompt(artists: Iterable[str], weights: Iterable[float], prefix: str = "") -> str:
     """把艺术家名与权重构建为提示词字符串。
 
-    权重为 1.0 时直接输出名称（不含括号与权重），例如 ``artist:a,(artist:b:0.7)``。
+    权重为 1.0 时直接输出名称（不含括号与权重），例如 ``artist:a,(artist:b:0.7),``。
+
+    末尾**总是补一个逗号**（即使只抽到 1 个艺术家）：这样把画师提示词与角色节点的
+    多行输出直接拼接时不会粘在一起。:func:`parse_prompt` 会跳过结尾的空段，
+    因此「构建 -> 解析」的往返结果不受影响。
     """
     parts: List[str] = []
     for artist, weight in zip(artists, weights):
         value = round(float(weight), 1)
         name = f"{prefix}{artist}"
         parts.append(name if value == 1.0 else f"({name}:{value})")
-    return ",".join(parts)
+    if not parts:
+        return ""
+    return ",".join(parts) + ","
 
 
 def parse_prompt(prompt: str) -> Tuple[List[str], List[float]]:
@@ -219,12 +216,6 @@ def normalize_dedup_mode(mode: Optional[str]) -> str:
     return value if value in DEDUP_MODES else "none"
 
 
-def normalize_generation_mode(mode: Optional[str]) -> str:
-    """规范化生成模式，非法值回退为 auto（保持历史行为）。"""
-    value = str(mode or "auto").strip().lower()
-    return value if value in GENERATION_MODES else "auto"
-
-
 def normalize_weight_curve(curve: Optional[str]) -> str:
     """规范化权重分配曲线，非法值回退为 flat（保持历史行为）。"""
     value = str(curve or "flat").strip().lower()
@@ -234,7 +225,7 @@ def normalize_weight_curve(curve: Optional[str]) -> str:
 def escape_key_part(value: str) -> str:
     """转义键分隔符：把 | 与 : 变成重复字符（可逆的重复表示法）。
 
-    组合池构建时会在 SQL 里拼同样的字符串，因此本函数必须保持纯字符串变换。
+    保持纯字符串变换（不依赖任何外部状态），便于单独测试与复用。
     """
     return str(value).replace(_KEY_SEP, _KEY_SEP * 2).replace(":", "::")
 
@@ -256,12 +247,3 @@ def dedup_key(mode: str, artists: Sequence[str], weights: Sequence[float]) -> st
     if mode == "artist_list":
         return _KEY_SEP.join(sorted(escape_key_part(name) for name in artists))
     return ""
-
-
-def weight_grid(weight_min: float, weight_max: float) -> List[float]:
-    """按 WEIGHT_STEP 枚举 [weight_min, weight_max] 内的所有权重（保留一位小数）。"""
-    low, high = round(float(weight_min), 1), round(float(weight_max), 1)
-    if high < low:
-        low, high = high, low
-    steps = int(round((high - low) / WEIGHT_STEP))
-    return [round(low + index * WEIGHT_STEP, 1) for index in range(max(0, steps) + 1)]

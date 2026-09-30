@@ -9,7 +9,8 @@
 - 第 2 段 == 转义后的 ``copyright`` 列（34,416/34,416）
 
 因此默认读 ``trigger`` 列：第 1 段当角色标签（已经转义，可直接使用），其余段就是作品标签。
-输出不做权重分配，每个角色一行：``角色标签,作品标签,core_tags``。
+输出不做权重分配，每个角色一行：``角色标签,作品标签,core_tags``，
+多个角色之间用「逗号 + 换行」分隔。
 
 纯逻辑模块，不依赖 ComfyUI，可单独测试。
 """
@@ -35,6 +36,7 @@ __all__ = [
     "build_records",
     "build_payload",
     "clear_records_cache",
+    "copyright_options",
     "escape_parens",
     "filter_by_copyright",
     "load_records",
@@ -42,10 +44,15 @@ __all__ = [
     "split_core_tags",
     "split_tags",
     "unique_tags",
+    "COPYRIGHT_ANY",
 ]
 
 # 名字列之外的辅助列（按表头名定位，缺失时该字段留空）
 AUX_COLUMNS: Tuple[str, ...] = ("copyright", "core_tags", "count")
+
+# 下拉菜单里代表「不限」的哨兵值。copyright 列实测没有空值，
+# 与真实作品名不可能撞车；界面文案写在 tooltip 里
+COPYRIGHT_ANY = "(不限)"
 
 
 class CharacterRecord(NamedTuple):
@@ -199,6 +206,25 @@ def filter_by_copyright(records: Sequence[CharacterRecord],
     return allowed
 
 
+def copyright_options(records: Sequence[CharacterRecord]) -> List[str]:
+    """列出可进下拉菜单的全部作品名（按 **count 总和**降序，相同时按名字升序）。
+
+    排序依据是「该作品下所有角色的 ``count`` 相加」——反映的是「这个作品整体有多热门」，
+    而不是「这个作品里有多少个角色」（后者会让 ``original`` 这种大杂烩永远排第一）。
+    并列时按名字升序，保证顺序稳定可复现。
+
+    默认数据（34,416 行）共 3,460 个作品，全部列出：现代前端的下拉可以直接打字筛选，
+    所以不再需要"只放常用作品 + 手输长尾"那套折中做法。
+    """
+    totals: Dict[str, int] = {}
+    for record in records:
+        name = record.copyright.strip()
+        if name:
+            totals[name] = totals.get(name, 0) + record.count
+    ordered = sorted(totals.items(), key=lambda item: (-item[1], item[0]))
+    return [name for name, _ in ordered]
+
+
 # ----------------------------------------------------------------------
 # 标签去重
 # ----------------------------------------------------------------------
@@ -224,7 +250,8 @@ def build_character_prompt(records: Sequence[CharacterRecord],
     - 外观标签取自 ``core_tags``，行内去重（源数据里存在同一角色重复列同一标签的情况）；
       ``include_core_tags=False`` 时每行只输出 ``角色标签,作品标签``
     - 空的部分自动省略，不会留下多余逗号（没有作品或外观标签时就只有角色标签）
-    - 多个角色用换行分隔
+    - 多个角色用「逗号 + 换行」分隔：每一行末尾都补一个逗号（最后一行不补），
+      这样把多行拼成一行时标签之间不会粘在一起；单个角色时不带尾逗号
     """
     lines: List[str] = []
     for record in records:
@@ -236,7 +263,7 @@ def build_character_prompt(records: Sequence[CharacterRecord],
         line = ",".join(part for part in parts if part)
         if line:
             lines.append(line)
-    return "\n".join(lines)
+    return ",\n".join(lines)
 
 
 # ----------------------------------------------------------------------
