@@ -11,17 +11,34 @@ from .constants import WEIGHT_SCALE, WEIGHT_STEP
 
 __all__ = [
     "DEDUP_MODES",
+    "GENERATION_MODES",
+    "WEIGHT_CURVES",
     "generate_weights",
     "build_prompt",
     "parse_prompt",
     "parse_weight_list",
     "normalize_dedup_mode",
+    "normalize_generation_mode",
+    "normalize_weight_curve",
+    "escape_key_part",
     "dedup_key",
     "weight_grid",
 ]
 
 # 去重模式：只有 none 之外的模式才需要读取已测记录
 DEDUP_MODES = ("none", "full_prompt", "artist_set", "artist_list")
+
+# 生成模式：
+# - auto   保持 3.2.x 行为（artist_count == 1 且未设置 force_include 时进入穷举）
+# - random 永不穷举
+# - exact  强制穷举（要求 artist_count == 1 且未设置 force_include）
+GENERATION_MODES = ("auto", "random", "exact")
+
+# 权重分配曲线（决定各艺术家权重是平均分配还是主次分明）：
+# - flat     现状：每位艺术家的随机倾向接近（0.5~1.5），风格平均混合
+# - dominant 主次分明：随机挑一位当主风格，权重明显高于其余
+# - ramp     阶梯：按随机名次递减（第一个最多，依次递减）
+WEIGHT_CURVES = ("flat", "dominant", "ramp")
 
 # 解析 "artist:name:0.8" / "(artist:name:0.8)" / "name" 这类片段
 _PROMPT_PART_RE = re.compile(
@@ -40,8 +57,34 @@ def _from_units(units: int) -> float:
     return round(units / WEIGHT_SCALE, 1)
 
 
+def _curve_desires(count: int, curve: str, rng: random.Random) -> List[float]:
+    """按分配曲线生成每个槽位的“倾向值”（相对份额，只有比例有意义）。
+
+    - ``flat``：全部在 0.5~1.5 之间随机，分配结果接近平均
+    - ``dominant``：随机挑一位给高倾向，其余给低倾向，形成明显主次
+    - ``ramp``：把槽位随机打乱后按名次递减（1, 1/2^0.7, 1/3^0.7 …），形成阶梯
+    """
+    if count <= 0:
+        return []
+    if curve == "dominant":
+        main = rng.randrange(count)
+        return [
+            rng.uniform(2.2, 3.2) if index == main else rng.uniform(0.15, 0.6)
+            for index in range(count)
+        ]
+    if curve == "ramp":
+        order = list(range(count))
+        rng.shuffle(order)
+        desires = [0.0] * count
+        for rank, index in enumerate(order):
+            desires[index] = 1.0 / (rank + 1) ** 0.7
+        return desires
+    return [rng.uniform(0.5, 1.5) for _ in range(count)]
+
+
 def generate_weights(count: int, weight_min: float, weight_max: float,
-                     weight_total: float, rng: random.Random) -> List[float]:
+                     weight_total: float, rng: random.Random,
+                     curve: Optional[str] = None) -> List[float]:
     """生成满足约束的随机权重列表。
 
     约束（与节点界面描述一致）：
@@ -49,6 +92,10 @@ def generate_weights(count: int, weight_min: float, weight_max: float,
     2. 权重总和精确等于 weight_total（超出可行区间时夹到边界）
     3. 每个权重保留一位小数，且分配结果带随机性
     4. 权重恒为非负：传入负数（API 直传可能出现）会被夹到 0
+
+    参数:
+        curve: 分配曲线，见 :data:`WEIGHT_CURVES`（非法值回退为 flat）。
+               它只影响“谁分得多”，不会破坏上面 4 条约束。
 
     实现说明：所有运算都在“0.1 的整数倍”单位上进行，避免浮点累计误差；
     先按随机倾向值做近似平均的分配，再用最大余数法与容量回填保证总和精确，
@@ -77,8 +124,8 @@ def generate_weights(count: int, weight_min: float, weight_max: float,
     if sum(caps) <= 0:  # min == max，所有槽位只能取同一个值
         return [_from_units(low_units)] * n
 
-    # 1) 随机“倾向值”决定各槽位的份额，分布接近平均而不是让某个艺术家独占
-    desire = [rng.uniform(0.5, 1.5) for _ in range(n)]
+    # 1) 倾向值决定各槽位的份额；曲线决定分布是平均还是主次分明
+    desire = _curve_desires(n, normalize_weight_curve(curve), rng)
     desire_sum = sum(desire)
     shares = [extra * value / desire_sum for value in desire]
 
@@ -172,8 +219,23 @@ def normalize_dedup_mode(mode: Optional[str]) -> str:
     return value if value in DEDUP_MODES else "none"
 
 
-def _escape_key_part(value: str) -> str:
-    """转义键分隔符：把 | 与 : 变成重复字符（可逆的重复表示法）。"""
+def normalize_generation_mode(mode: Optional[str]) -> str:
+    """规范化生成模式，非法值回退为 auto（保持历史行为）。"""
+    value = str(mode or "auto").strip().lower()
+    return value if value in GENERATION_MODES else "auto"
+
+
+def normalize_weight_curve(curve: Optional[str]) -> str:
+    """规范化权重分配曲线，非法值回退为 flat（保持历史行为）。"""
+    value = str(curve or "flat").strip().lower()
+    return value if value in WEIGHT_CURVES else "flat"
+
+
+def escape_key_part(value: str) -> str:
+    """转义键分隔符：把 | 与 : 变成重复字符（可逆的重复表示法）。
+
+    组合池构建时会在 SQL 里拼同样的字符串，因此本函数必须保持纯字符串变换。
+    """
     return str(value).replace(_KEY_SEP, _KEY_SEP * 2).replace(":", "::")
 
 
@@ -186,13 +248,13 @@ def dedup_key(mode: str, artists: Sequence[str], weights: Sequence[float]) -> st
     """
     if mode == "full_prompt":
         return _KEY_SEP.join(
-            f"{_escape_key_part(artist)}:{round(float(weight), 1)}"
+            f"{escape_key_part(artist)}:{round(float(weight), 1)}"
             for artist, weight in zip(artists, weights)
         )
     if mode == "artist_set":
-        return _KEY_SEP.join(sorted(_escape_key_part(name) for name in set(artists)))
+        return _KEY_SEP.join(sorted(escape_key_part(name) for name in set(artists)))
     if mode == "artist_list":
-        return _KEY_SEP.join(sorted(_escape_key_part(name) for name in artists))
+        return _KEY_SEP.join(sorted(escape_key_part(name) for name in artists))
     return ""
 
 

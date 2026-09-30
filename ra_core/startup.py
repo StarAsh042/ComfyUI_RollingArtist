@@ -1,25 +1,35 @@
-"""启动期清理：删除节点目录下的默认运行期记录文件。
+"""启动期清理：删除节点目录下的默认运行期文件。
 
 ComfyUI 在导入任何自定义节点之前，会执行 ``custom_nodes/<节点>/prestartup_script.py``
 （见 ComfyUI ``main.py`` 的 ``execute_prestartup_script``），本模块提供该脚本调用的实现，
 保证每次启动 ComfyUI 都不带着上次运行留下的记录。
 
-清理范围**只限默认路径**（``DEFAULT_TESTED_CSV`` 与由它派生的 ``*_remaining.csv``）：
-用户显式指定的 ``tested_csv_path`` 一律不动，那代表用户主动选择要跨会话保留的记录文件。
+清理范围**只限默认路径**：
+
+- 默认数据库 ``rollingartist.sqlite`` 与 ``rollingcharacter.sqlite``
+  （各含 WAL 模式的 ``-wal`` / ``-shm`` 附带文件）
+- 旧版 CSV 记录 ``tested_combinations.csv`` 与 ``tested_combinations_remaining.csv``
+  （兼容从 3.2.x 升级上来的残留文件）
+
+用户显式指定的数据库路径 / 旧记录路径一律不动，那代表用户主动选择要跨会话保留的数据。
 """
 
 import os
 from typing import List
 
-from .constants import DEFAULT_TESTED_CSV, LOGGER
+from .constants import DEFAULT_CHARACTER_DB, DEFAULT_DB, DEFAULT_TESTED_CSV, LOGGER
 from .exact import remaining_path_for
 
 __all__ = ["default_runtime_files", "cleanup_default_runtime_files"]
 
 
 def default_runtime_files() -> List[str]:
-    """默认路径下的运行期文件：已测组合记录 + Exact 模式的剩余组合池。"""
-    return [DEFAULT_TESTED_CSV, remaining_path_for(DEFAULT_TESTED_CSV)]
+    """默认路径下的运行期文件：两份数据库 + WAL 附带文件 + 旧版两份 CSV。"""
+    files: List[str] = []
+    for db_path in (DEFAULT_DB, DEFAULT_CHARACTER_DB):
+        files.extend([db_path, f"{db_path}-wal", f"{db_path}-shm"])
+    files.extend([DEFAULT_TESTED_CSV, remaining_path_for(DEFAULT_TESTED_CSV)])
+    return files
 
 
 def cleanup_default_runtime_files() -> List[str]:

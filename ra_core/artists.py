@@ -18,8 +18,12 @@ from .constants import CSV_READ_ENCODING, DEFAULT_ARTIST_CSV, LOGGER
 
 __all__ = [
     "ArtistRepository",
+    "get_repository",
     "get_artist_repository",
+    "clear_repositories",
     "parse_artist_rows",
+    "normalize_column_spec",
+    "resolve_layout",
     "compute_top_count",
     "select_artists",
     "split_names",
@@ -33,9 +37,16 @@ HEADER_TOKENS = frozenset({
     "core_tags", "category", "source", "notes", "description", "sample",
 })
 
-# auto 模式下按优先级挑选的列名
+# auto 模式下按优先级挑选的列名。
+# 顺序说明：
+# - ``character`` 系列最优先：danbooru_character.csv 的 trigger 是「角色 + 作品」多标签串
+#   （如 "hatsune miku, vocaloid"），当成单个艺术家名会破坏提示词，因此必须让 character 胜出
+# - ``trigger`` 排在 ``artist`` 之前：trigger 列是「提示词可直接使用」的写法
+#   （空格与括号已转义，见 modify_danbooru_art.py），而 artist 列是 danbooru 原始标签，
+#   可能带未转义括号（会破坏权重语法）
 COLUMN_PRIORITY = (
-    "artist", "artists", "character", "characters", "name", "names", "tag", "tags",
+    "character", "characters", "trigger",
+    "artist", "artists", "name", "names", "tag", "tags",
 )
 
 COLUMN_ALL = "all"
@@ -56,13 +67,13 @@ def is_header_row(row: Sequence[str]) -> bool:
     return all(cell in HEADER_TOKENS for cell in cells)
 
 
-def _normalize_spec(column: Optional[str]) -> str:
-    """归一化 csv_column 参数。"""
+def normalize_column_spec(column: Optional[str]) -> str:
+    """归一化 csv_column 参数（auto / all / 列序号 / 列名）。"""
     spec = str(column or COLUMN_AUTO).strip().lower()
     return spec.replace("-", "_").replace(" ", "_") or COLUMN_AUTO
 
 
-def _resolve_layout(sample_row: Sequence[str], spec: str, has_header: bool):
+def resolve_layout(sample_row: Sequence[str], spec: str, has_header: bool):
     """根据首行与 csv_column 配置决定取哪些列。
 
     返回 ``"all"``（展平所有列）或列索引 int。
@@ -103,7 +114,7 @@ def parse_artist_rows(rows: Iterable[Sequence[str]],
         column: ``auto``（默认，自动识别表头/列）、``all``（展平所有列）、
                 列索引（``"0"``）或表头列名（``"artist"``）
     """
-    spec = _normalize_spec(column)
+    spec = normalize_column_spec(column)
     iterator = iter(rows)
 
     first: Optional[Sequence[str]] = None
@@ -115,7 +126,7 @@ def parse_artist_rows(rows: Iterable[Sequence[str]],
         return []
 
     has_header = is_header_row(first)
-    layout = _resolve_layout(first, spec, has_header)
+    layout = resolve_layout(first, spec, has_header)
     if not has_header and isinstance(layout, int) and layout > 0:
         # auto 模式在“非首列”命中列名，说明首行就是表头（即使含有未识别的列名），
         # 否则会把表头里的 artist 之类的字面量当成一个艺术家名
@@ -152,6 +163,7 @@ class ArtistRepository:
         self.default_path = default_path
         self._lock = threading.RLock()
         self._cache: "OrderedDict[Tuple[str, str, int, int], List[str]]" = OrderedDict()
+        self._rows_cache: "OrderedDict[Tuple[str, int, int], List[List[str]]]" = OrderedDict()
 
     # ------------------------------------------------------------------
     # 加载
@@ -176,7 +188,7 @@ class ArtistRepository:
         失败时返回空列表并记录日志，不抛出异常，由调用方决定如何报错。
         """
         path = self.resolve_path(custom_path)
-        spec = _normalize_spec(column)
+        spec = normalize_column_spec(column)
         stat_key = self.stat_key(path)
         cache_key = (stat_key[0], spec, stat_key[1], stat_key[2]) if stat_key else None
 
@@ -217,23 +229,87 @@ class ArtistRepository:
             LOGGER.warning("[RollingArtist] CSV 中未解析到任何艺术家: %s", path)
         return artists
 
+    def load_rows(self, custom_path: Optional[str] = None
+                  ) -> Tuple[List[List[str]], Optional[Tuple[str, int, int]]]:
+        """读取并缓存整份 CSV 行，返回 ``(rows, stat_key)``。
+
+        与 :meth:`load` 共用同一套「文件签名」缓存策略，供需要多列的节点使用
+        （例如 RollingCharacter 要同时用 trigger / copyright / core_tags / count）。
+        行内保持原始顺序，表头行也在其中，由调用方自行判断。
+        """
+        path = self.resolve_path(custom_path)
+        stat_key = self.stat_key(path)
+        if stat_key is not None:
+            with self._lock:
+                cached = self._rows_cache.get(stat_key)
+                if cached is not None:
+                    self._rows_cache.move_to_end(stat_key)
+                    return cached, stat_key
+
+        rows = self._read_rows(path)
+
+        if stat_key is not None and rows:
+            with self._lock:
+                self._rows_cache[stat_key] = rows
+                self._rows_cache.move_to_end(stat_key)
+                while len(self._rows_cache) > self._MAX_CACHE:
+                    self._rows_cache.popitem(last=False)
+        return rows, stat_key
+
+    def _read_rows(self, path: str) -> List[List[str]]:
+        try:
+            with open(path, "r", encoding=CSV_READ_ENCODING, newline="") as handle:
+                return [row for row in csv.reader(handle) if row]
+        except FileNotFoundError:
+            LOGGER.error("[RollingArtist] CSV 文件不存在: %s", path)
+            return []
+        except IsADirectoryError:
+            LOGGER.error("[RollingArtist] CSV 路径是目录: %s", path)
+            return []
+        except UnicodeDecodeError as error:
+            LOGGER.error("[RollingArtist] CSV 编码无法解析（请使用 UTF-8）: %s -> %s", path, error)
+            return []
+        except (OSError, csv.Error) as error:
+            LOGGER.error("[RollingArtist] CSV 读取失败: %s -> %s", path, error)
+            return []
+
     def clear_cache(self) -> None:
         """清空加载缓存（测试或手动热重载时使用）。"""
         with self._lock:
             self._cache.clear()
+            self._rows_cache.clear()
 
 
 _REPOSITORY_LOCK = threading.RLock()
-_REPOSITORY: Optional[ArtistRepository] = None
+_REPOSITORIES: Dict[str, ArtistRepository] = {}
+
+
+def get_repository(default_path: str = DEFAULT_ARTIST_CSV) -> ArtistRepository:
+    """按默认路径获取进程级共享的仓库。
+
+    不同默认文件各自一个实例（画师 CSV / 角色 CSV 互不干扰），
+    同一默认文件下的多个节点实例共享解析结果。
+    """
+    key = os.path.normcase(os.path.abspath(default_path))
+    with _REPOSITORY_LOCK:
+        repository = _REPOSITORIES.get(key)
+        if repository is None:
+            repository = ArtistRepository(default_path)
+            _REPOSITORIES[key] = repository
+        return repository
 
 
 def get_artist_repository() -> ArtistRepository:
-    """获取进程级单例仓库，多个节点实例共享 CSV 解析结果。"""
-    global _REPOSITORY
+    """获取默认画师 CSV 的进程级共享仓库。"""
+    return get_repository(DEFAULT_ARTIST_CSV)
+
+
+def clear_repositories() -> None:
+    """清空全部共享仓库（测试或手动热重载时使用）。"""
     with _REPOSITORY_LOCK:
-        if _REPOSITORY is None:
-            _REPOSITORY = ArtistRepository()
-        return _REPOSITORY
+        for repository in _REPOSITORIES.values():
+            repository.clear_cache()
+        _REPOSITORIES.clear()
 
 
 # ----------------------------------------------------------------------

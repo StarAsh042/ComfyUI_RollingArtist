@@ -5,7 +5,7 @@
     "inputs": {
       "artist_count": {
         "name": "Artist Count",
-        "tooltip": "Number of artists generated per run (1-10). When set to 1 with an empty Force Include, the node enters Exact mode: it enumerates (artist, weight) combinations without repetition and returns ALL_COMBINATIONS_TESTED once every combination has been used."
+        "tooltip": "Number of artists generated per run (1-10). With Mode = auto, setting this to 1 while Force Include is empty enters Exact mode: it enumerates (artist, weight) combinations without repetition and returns ALL_COMBINATIONS_TESTED once every combination has been used. To draw a single artist without exhausting, set Mode = random."
       },
       "artist_top_ratio": {
         "name": "Top Pool Ratio",
@@ -26,6 +26,10 @@
       "weight_total": {
         "name": "Weight Total",
         "tooltip": "Sum of all weights (step 0.5), distributed exactly; clamped to the feasible range when out of bounds. Not used in Exact mode, where weights are enumerated on a 0.1 grid instead."
+      },
+      "weight_curve": {
+        "name": "Weight Curve",
+        "tooltip": "Controls who gets more weight only; bounds and total are unaffected. flat = even (current behaviour, similar weights, styles blend evenly); dominant = one random artist clearly dominates; ramp = descending ladder over a random order. Not used in Exact mode."
       },
       "artists_prefix": {
         "name": "artist: Prefix",
@@ -51,6 +55,10 @@
         "name": "Force Include",
         "tooltip": "Artist names that must appear, comma separated. Takes priority over Exclude Artists; when their count reaches Artist Count the result is drawn from this list."
       },
+      "mode": {
+        "name": "Mode",
+        "tooltip": "Generation mode. auto = previous behaviour (Artist Count = 1 with an empty Force Include enters Exact mode); random = never exhaust; exact = force Exact mode (requires Artist Count = 1 and an empty Force Include, otherwise the node errors out). Dedup mode and Weight Total do not apply in Exact mode."
+      },
       "dedup_mode": {
         "name": "Dedup Mode",
         "tooltip": "Dedup key: none = record only, no duplicate check; full_prompt = same artist order and weights; artist_set = same artist set (order and weights ignored); artist_list = same sorted names (weights ignored). Exact mode always uses full_prompt."
@@ -59,17 +67,13 @@
         "name": "Max Attempts",
         "tooltip": "Maximum retries in dedup mode (1-100). If every retry hits an already-tested combination, the last result is accepted and a WARNING is logged."
       },
-      "csv_column": {
-        "name": "CSV Column",
-        "tooltip": "Which CSV column to read artists from: auto = detect the header (artist/character/name/tag preferred, first column when there is no header); all = flatten every column (3.0.0 behaviour); or a column index 0/1/... / a column name."
-      },
       "custom_csv_path": {
         "name": "Custom CSV Path",
         "tooltip": "Path to a custom artist CSV; leave empty to use danbooru_art_001.csv in the node directory."
       },
-      "tested_csv_path": {
-        "name": "Tested Records Path",
-        "tooltip": "Path of the tested-combinations record file; leave empty to use tested_combinations.csv in the node directory. Changing the path resets dedup progress."
+      "tested_db_path": {
+        "name": "Records DB Path",
+        "tooltip": "Path of the SQLite records database; leave empty to use rollingartist.sqlite in the node directory. Both tested records and the Exact-mode combination pool live here, so changing the path resets dedup progress. The database at the default path is cleared on every startup; set an explicit path to keep it across sessions."
       }
     },
     "outputs": {
@@ -80,6 +84,86 @@
       "1": {
         "name": "Artists JSON",
         "tooltip": "Structured result JSON (artists / weights / top flag / status)."
+      },
+      "2": {
+        "name": "Tested Count",
+        "tooltip": "Number of combinations recorded in the current database."
+      },
+      "3": {
+        "name": "Remaining Count",
+        "tooltip": "Combinations left in the pool in Exact mode; always 0 outside Exact mode (including when a huge universe falls back to random sampling)."
+      }
+    }
+  },
+  "RollingCharacter": {
+    "display_name": "Rolling Character",
+    "description": "Randomly draws characters from a character CSV and outputs one line per character as \"character tag, copyright tag, core_tags\" (newline separated), plus a structured JSON result and the tested count.",
+    "inputs": {
+      "character_count": {
+        "name": "Character Count",
+        "tooltip": "Number of characters generated per run (1-10), one output line each. Characters are single tags, so there is no exhaustion mode."
+      },
+      "character_top_ratio": {
+        "name": "Top Pool Ratio",
+        "tooltip": "Top pool ratio (0.01-1.0): the first ceil(candidates × ratio) rows of the CSV (at least 1) form the Top pool; earlier rows have more works. Candidates are the characters left after Copyright Filter."
+      },
+      "character_top_count": {
+        "name": "Top Pick Count",
+        "tooltip": "How many Top-pool characters are drawn per run at minimum (1-10). Only used when Top Priority is enabled and the Top pool is not empty."
+      },
+      "seed": {
+        "name": "Seed",
+        "tooltip": "Random seed. The same seed with the same settings is reproducible; dedup mode and max attempts change the actual sampling sequence."
+      },
+      "use_top_priority": {
+        "name": "Top Priority",
+        "tooltip": "When on, draws from the Top pool first and always includes Top Pick Count Top characters; when off, samples uniformly from all candidates."
+      },
+      "exclude_characters": {
+        "name": "Exclude Characters",
+        "tooltip": "Character names to exclude, comma separated. Excluded names never appear in the result."
+      },
+      "force_include": {
+        "name": "Force Include",
+        "tooltip": "Character names that must appear, comma separated. Takes priority over Exclude Characters; when their count reaches Character Count the result is drawn from this list. Names that are not in the CSV still work, but carry no copyright or appearance tags."
+      },
+      "copyright_filter": {
+        "name": "Copyright Filter",
+        "tooltip": "Only draw characters from these works, comma separated (for example touhou,vocaloid); empty means no limit. Accepts both the raw copyright form fate_(series) and the escaped trigger form fate_\\(series\\), case-insensitively. Errors out when nothing is left after filtering."
+      },
+      "include_core_tags": {
+        "name": "Include Appearance Tags",
+        "tooltip": "Whether to append each character's fixed appearance tags (core_tags) to its line. On: \"character tag, copyright tag, core_tags\"; off: \"character tag, copyright tag\"."
+      },
+      "dedup_mode": {
+        "name": "Dedup Mode",
+        "tooltip": "Dedup key: none = record only; full_prompt = same character order and weights; artist_set = same character set (order and weights ignored); artist_list = same sorted names (weights ignored)."
+      },
+      "max_attempts": {
+        "name": "Max Attempts",
+        "tooltip": "Maximum retries in dedup mode (1-100). If every retry hits an already-tested combination, the last result is accepted and a WARNING is logged."
+      },
+      "custom_csv_path": {
+        "name": "Custom CSV Path",
+        "tooltip": "Path to a custom character CSV; leave empty for danbooru_character_001.csv in the node directory."
+      },
+      "tested_db_path": {
+        "name": "Records DB Path",
+        "tooltip": "Path of the SQLite records database; leave empty for rollingcharacter.sqlite in the node directory (separate from the artist node). Changing the path resets dedup progress."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Character List",
+        "tooltip": "One line per character in the form \"character tag, copyright tag, core_tags\", with no weights. With \"Include Appearance Tags\" turned off it becomes \"character tag, copyright tag\"."
+      },
+      "1": {
+        "name": "Characters JSON",
+        "tooltip": "Structured result JSON (character / copyright / top flag / count / appearance tags)."
+      },
+      "2": {
+        "name": "Tested Count",
+        "tooltip": "Number of character combinations recorded in the current database."
       }
     }
   }

@@ -5,7 +5,7 @@
     "inputs": {
       "artist_count": {
         "name": "艺术家数量",
-        "tooltip": "每次生成的艺术家数量（1-10）。设为 1 且“强制包含”为空时进入 Exact 穷举模式：按 (艺术家, 权重) 组合逐个不重复输出，穷举完返回 ALL_COMBINATIONS_TESTED"
+        "tooltip": "每次生成的艺术家数量（1-10）。在“模式=自动”下，设为 1 且“强制包含”为空会进入穷举模式：按 (艺术家, 权重) 组合逐个不重复输出，穷举完返回 ALL_COMBINATIONS_TESTED。想只抽 1 个而不穷举请把“模式”改为普通"
       },
       "artist_top_ratio": {
         "name": "Top 池占比",
@@ -25,7 +25,11 @@
       },
       "weight_total": {
         "name": "权重总和",
-        "tooltip": "所有权重之和（步长 0.5），按总和精确分配，超出可行区间时夹到边界；artist_count=1 的 Exact 模式不生效（改为按 0.1 网格枚举单个权重）"
+        "tooltip": "所有权重之和（步长 0.5），按总和精确分配，超出可行区间时夹到边界；穷举模式不生效（改为按 0.1 网格枚举单个权重）"
+      },
+      "weight_curve": {
+        "name": "权重分配曲线",
+        "tooltip": "只影响“谁分得多”，不影响上下限与总和。flat=平坦（现状，各位权重接近，风格平均混合）；dominant=主次分明（随机一位当主风格，权重明显更高）；ramp=阶梯（按随机名次递减）。穷举模式按权重网格枚举，本项不生效"
       },
       "artists_prefix": {
         "name": "artist: 前缀",
@@ -51,25 +55,25 @@
         "name": "强制包含",
         "tooltip": "必须出现的艺术家名，英文逗号分隔；优先级高于“排除艺术家”，数量达到 artist_count 时直接从中随机抽取"
       },
+      "mode": {
+        "name": "模式",
+        "tooltip": "生成模式。auto=保持旧行为（艺术家数量=1 且未填“强制包含”时进入穷举）；random=永远随机抽取；exact=强制穷举（要求艺术家数量=1 且未填“强制包含”，不满足时直接报错）。穷举模式下去重模式与权重总和都不生效"
+      },
       "dedup_mode": {
         "name": "去重模式",
-        "tooltip": "去重依据：none=只记录不判重；full_prompt=艺术家顺序与权重完全一致；artist_set=艺术家集合一致（忽略顺序与权重）；artist_list=排序后的名字一致（忽略权重）。Exact 模式固定按 full_prompt 判定"
+        "tooltip": "去重依据：none=只记录不判重；full_prompt=艺术家顺序与权重完全一致；artist_set=艺术家集合一致（忽略顺序与权重）；artist_list=排序后的名字一致（忽略权重）。穷举模式固定按 full_prompt 判定"
       },
       "max_attempts": {
         "name": "最大重试次数",
         "tooltip": "去重模式下的最大重试次数（1-100）；重试后仍全部命中已测组合时接受最后一次结果，并输出 WARNING 日志"
       },
-      "csv_column": {
-        "name": "CSV 列",
-        "tooltip": "从 CSV 的哪一列读取艺术家：auto=自动识别表头（优先 artist/character/name/tag，无表头时取首列）；all=展平所有列（3.0.0 旧行为）；也可填列序号 0/1/… 或列名"
-      },
       "custom_csv_path": {
         "name": "自定义 CSV 路径",
         "tooltip": "自定义艺术家 CSV 的路径；留空使用节点目录下的 danbooru_art_001.csv"
       },
-      "tested_csv_path": {
-        "name": "已测记录路径",
-        "tooltip": "已测组合记录的文件路径；留空使用节点目录下的 tested_combinations.csv。更换该路径相当于重置去重进度"
+      "tested_db_path": {
+        "name": "记录数据库路径",
+        "tooltip": "记录数据库（SQLite）路径；留空使用节点目录下的 rollingartist.sqlite。已测记录与穷举组合池都存这里，更换该路径相当于重置去重进度。默认路径的数据库每次启动会被清理，要跨会话保留请显式指定"
       }
     },
     "outputs": {
@@ -80,6 +84,86 @@
       "1": {
         "name": "艺术家 JSON",
         "tooltip": "结构化结果 JSON（艺术家 / 权重 / 是否 Top / 状态）"
+      },
+      "2": {
+        "name": "已测数量",
+        "tooltip": "当前数据库里已记录的组合数量"
+      },
+      "3": {
+        "name": "剩余组合数",
+        "tooltip": "穷举模式下组合池里还剩多少条组合；非穷举模式（含总量过大而降级采样时）恒为 0"
+      }
+    }
+  },
+  "RollingCharacter": {
+    "display_name": "滚动角色",
+    "description": "从角色 CSV 中随机抽取角色，按「角色标签,作品标签,core_tags」逐行输出（多个角色换行分隔），并输出结构化 JSON 与已测数量。",
+    "inputs": {
+      "character_count": {
+        "name": "角色数量",
+        "tooltip": "每次生成的角色数量（1-10），每个角色输出一行。角色是单词条，没有穷举模式"
+      },
+      "character_top_ratio": {
+        "name": "人气池占比",
+        "tooltip": "人气池占比（0.01-1.0）：按 CSV 行序取前 ceil(候选数×比例) 个（至少 1 个）作为 Top 池，行序越靠前的角色作品数越多。候选数指“作品过滤之后”剩下的角色数"
+      },
+      "character_top_count": {
+        "name": "人气池抽取数量",
+        "tooltip": "每次至少抽取几个人气池角色（1-10）；仅在“Top 优先抽样”开启且人气池非空时生效"
+      },
+      "seed": {
+        "name": "随机种子",
+        "tooltip": "随机种子。同一种子在同一组参数下结果可复现；去重模式与重试次数会改变实际的抽样序列"
+      },
+      "use_top_priority": {
+        "name": "Top 优先抽样",
+        "tooltip": "开启时优先从人气池抽角色，并保证含 character_top_count 个人气角色；关闭时从完整候选列表均匀抽样"
+      },
+      "exclude_characters": {
+        "name": "排除角色",
+        "tooltip": "要排除的角色名，英文逗号分隔；被排除的名字不会出现在结果中"
+      },
+      "force_include": {
+        "name": "强制包含",
+        "tooltip": "必须出现的角色名，英文逗号分隔；优先级高于“排除角色”，数量达到角色数量时直接从中随机抽取。不在 CSV 里的名字也能用，只是没有作品与外观标签信息"
+      },
+      "copyright_filter": {
+        "name": "作品过滤",
+        "tooltip": "只从这些作品里抽角色，英文逗号分隔（例如 touhou,vocaloid）；留空表示不限。同时接受 copyright 列的原始写法 fate_(series) 与 trigger 里转义后的写法 fate_\\(series\\)，比较忽略大小写。过滤后没有候选时会报错"
+      },
+      "include_core_tags": {
+        "name": "拼入外观标签",
+        "tooltip": "是否把角色的固定外观标签（core_tags）拼进每一行。开启时格式为「角色标签,作品标签,core_tags」；关闭时格式为「角色标签,作品标签」"
+      },
+      "dedup_mode": {
+        "name": "去重模式",
+        "tooltip": "去重依据：none=只记录不判重；full_prompt=角色顺序与权重完全一致；artist_set=角色集合一致（忽略顺序与权重）；artist_list=排序后的名字一致（忽略权重）"
+      },
+      "max_attempts": {
+        "name": "最大重试次数",
+        "tooltip": "去重模式下的最大重试次数（1-100）；重试后仍全部命中已测组合时接受最后一次结果，并输出 WARNING 日志"
+      },
+      "custom_csv_path": {
+        "name": "自定义 CSV 路径",
+        "tooltip": "自定义角色 CSV 的路径；留空使用节点目录下的 danbooru_character_001.csv"
+      },
+      "tested_db_path": {
+        "name": "记录数据库路径",
+        "tooltip": "记录数据库（SQLite）路径；留空使用节点目录下的 rollingcharacter.sqlite（与画师节点分开）。更换该路径相当于重置去重进度"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "角色列表",
+        "tooltip": "每个角色一行，格式为「角色标签,作品标签,core_tags」，不带权重；关闭「拼入外观标签」后为「角色标签,作品标签」"
+      },
+      "1": {
+        "name": "角色 JSON",
+        "tooltip": "结构化结果 JSON（角色 / 作品 / 是否 Top / 热度 / 外观标签）"
+      },
+      "2": {
+        "name": "已测数量",
+        "tooltip": "当前数据库里已记录的角色组合数量"
       }
     }
   }

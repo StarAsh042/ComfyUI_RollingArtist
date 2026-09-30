@@ -8,5 +8,14 @@
 # CodeBuddy 本地配置与本地项目记忆（技能目录 + 本机专用记忆，按官方约定不提交）
 .codebuddy
 CODEBUDDY.md
+
+# 运行期记录：默认 SQLite 数据库（含 WAL 附带文件）与旧版 CSV 记录
+rollingartist.sqlite
+rollingartist.sqlite-wal
+rollingartist.sqlite-shm
+rollingcharacter.sqlite
+rollingcharacter.sqlite-wal
+rollingcharacter.sqlite-shm
 tested_combinations_remaining.csv
 tested_combinations.csv
+tests

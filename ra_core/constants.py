@@ -11,7 +11,19 @@ from typing import Final
 # 节点目录（ra_core 的上一级），所有默认文件均相对于该目录
 NODE_DIR: Final[str] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_ARTIST_CSV: Final[str] = os.path.join(NODE_DIR, "danbooru_art_001.csv")
+DEFAULT_CHARACTER_CSV: Final[str] = os.path.join(NODE_DIR, "danbooru_character_001.csv")
+# 4.0.0 起记录与组合池统一存进 SQLite；该常量保留用于兼容旧版 CSV 记录文件
 DEFAULT_TESTED_CSV: Final[str] = os.path.join(NODE_DIR, "tested_combinations.csv")
+# 默认数据库：同时承载「已测记录」与「穷举剩余组合池」
+DEFAULT_DB: Final[str] = os.path.join(NODE_DIR, "rollingartist.sqlite")
+# 角色节点的默认数据库：与画师分开，互不干扰
+DEFAULT_CHARACTER_DB: Final[str] = os.path.join(NODE_DIR, "rollingcharacter.sqlite")
+
+# 记录类型标记：两个节点即使被指向同一个数据库，同名的画师与角色也不会互相冒充
+KIND_ARTIST: Final[str] = "artist"
+KIND_CHARACTER: Final[str] = "character"
+# 旧版 CSV 记录文件在导入数据库后改名留底用的后缀
+LEGACY_BACKUP_SUFFIX: Final[str] = ".bak"
 
 # 权重枚举步长（Exact 模式与界面 step 保持一致）
 WEIGHT_STEP: Final[float] = 0.1
@@ -23,8 +35,9 @@ WEIGHT_SCALE: Final[int] = 10 ** WEIGHT_DECIMALS
 EXACT_COMBOS_WARN: Final[int] = 100000
 # Exact 模式：组合数超过该值时不再物化组合池，改为随机采样 + 去重
 EXACT_COMBOS_LIMIT: Final[int] = 1000000
-# Exact 模式：遗留 remaining 文件超过该体积时拒绝加载（避免 OOM）
-EXACT_FILE_LIMIT_BYTES: Final[int] = 64 * 1024 * 1024
+# 组合池最多同时保留几套（按最近构建时间淘汰）：换配置会产生新池，
+# 保留少量以免数据库无限膨胀，同时避免多套配置互相覆盖对方的进度
+EXACT_POOL_KEEP: Final[int] = 4
 
 # CSV 读取使用 utf-8-sig，自动兼容带 BOM 的文件；写入统一使用 utf-8
 CSV_READ_ENCODING: Final[str] = "utf-8-sig"
