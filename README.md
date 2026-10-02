@@ -50,6 +50,21 @@ git clone https://github.com/StarAsh042/ComfyUI_RollingArtist.git
 `danbooru_character_001.csv`（角色，`character,copyright,trigger,core_tags,count`）。
 要换成自己的数据，用 `modify_danbooru_art.py` / `modify_danbooru_character.py` 加工（见[数据预处理](#数据预处理)）。
 
+### Git LFS（只影响两个原始导出 CSV）
+
+`danbooru_art_full.csv`（约 31 MB）与 `danbooru_character.csv`（约 37 MB）是上面两个加工脚本的**输入**，
+已改用 Git LFS 存储。节点运行时读的 `*_001.csv` 是普通 git 文件，**没装 git-lfs 也照常能用节点**；
+只有你想重新跑加工脚本时，才需要拿到这两个原始文件：
+
+```bash
+git lfs install     # 首次使用：装好 smudge / clean 过滤器
+git lfs pull        # 已克隆过：把本地指针替换成真实内容
+```
+
+如果克隆时没装 git-lfs（或用了 `GIT_LFS_SKIP_SMUDGE=1`），这两个文件会是百来字节的**指针文本**，
+首行是 `version https://git-lfs.github.com/spec/v1`——直接喂给加工脚本会以「缺列」报错，
+按上面的命令补拉一次即可。
+
 `ra_core/`（相对导入）、`locales/`、`web/docs/` 都由 ComfyUI 按目录约定自动加载，无需注册；
 `locales/` 或 `web/` 缺失只影响界面文案，不影响功能。
 
