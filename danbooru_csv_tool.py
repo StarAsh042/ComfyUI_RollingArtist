@@ -101,9 +101,9 @@ def find_columns(header: Sequence[str], columns: Sequence[str]) -> dict:
 # ----------------------------------------------------------------------
 # 转换
 # ----------------------------------------------------------------------
-def convert(rows: Iterable[Sequence[str]], min_count: int,
-            columns: Sequence[str],
-            escape_columns: Sequence[str] = ()) -> Tuple[List[List[str]], dict]:
+def convert(
+    rows: Iterable[Sequence[str]], min_count: int, columns: Sequence[str], escape_columns: Sequence[str] = ()
+) -> Tuple[List[List[str]], dict]:
     """把源行转换为输出行。
 
     参数:
@@ -181,7 +181,7 @@ def convert(rows: Iterable[Sequence[str]], min_count: int,
 # 文件读写
 # ----------------------------------------------------------------------
 def read_rows(path: str) -> List[List[str]]:
-    with open(path, "r", encoding="utf-8-sig", newline="") as handle:
+    with open(path, encoding="utf-8-sig", newline="") as handle:
         return list(csv.reader(handle))
 
 
@@ -209,8 +209,10 @@ def write_rows(path: str, rows: Sequence[Sequence[str]]) -> str:
     try:
         with open(path, "w", encoding="utf-8", newline="") as handle:
             csv.writer(handle).writerows(rows)
-    except OSError:
-        raise last_error if last_error is not None else OSError("写入失败")
+    except OSError as error:
+        # 保留最初原子替换失败的异常（更有诊断价值），并把它链接到当前异常上
+        cause = last_error if last_error is not None else error
+        raise cause from error
     finally:
         if os.path.exists(temp_path):
             try:
@@ -245,8 +247,15 @@ def backup_output(path: str) -> Optional[str]:
 # ----------------------------------------------------------------------
 # 命令行执行
 # ----------------------------------------------------------------------
-def run(source: str, target: str, min_count: int, columns: Sequence[str],
-        escape_columns: Sequence[str], prefix: str, backup: bool = True) -> int:
+def run(
+    source: str,
+    target: str,
+    min_count: int,
+    columns: Sequence[str],
+    escape_columns: Sequence[str],
+    prefix: str,
+    backup: bool = True,
+) -> int:
     """执行一次加工，返回退出码（0 成功）。所有日志都以 ``prefix`` 开头。"""
     source = os.path.abspath(source)
     target = os.path.abspath(target)
@@ -285,8 +294,7 @@ def run(source: str, target: str, min_count: int, columns: Sequence[str],
     except OSError as error:
         if isinstance(error, PermissionError):
             print(f"{prefix} 目标文件被其他程序占用，无法写入：{target}")
-            print("  请关闭正在打开该文件的编辑器（或暂停网盘同步 / 杀软实时扫描）后重试；"
-                  "原文件未被修改。")
+            print("  请关闭正在打开该文件的编辑器（或暂停网盘同步 / 杀软实时扫描）后重试；原文件未被修改。")
         print(f"{prefix} 写入失败：{target} -> {error}")
         return 1
 
@@ -294,7 +302,9 @@ def run(source: str, target: str, min_count: int, columns: Sequence[str],
     print(f"{prefix} 输入：{source}")
     print(f"{prefix} 输出：{target}（{len(output) - 1} 行 + 表头，{size / 1048576:.2f} MB）")
     print(f"{prefix} 输出列：{', '.join(columns)}；转义列：{', '.join(escape_columns) or '无'}")
-    print(f"{prefix} 条件：count >= {min_count}"
-          f"；源文件 {stats['total']} 行，保留 {stats['kept']} 行，跳过 {stats['skipped']} 行")
+    print(
+        f"{prefix} 条件：count >= {min_count}"
+        f"；源文件 {stats['total']} 行，保留 {stats['kept']} 行，跳过 {stats['skipped']} 行"
+    )
     print(f"{prefix} 写入方式：{write_mode}")
     return 0

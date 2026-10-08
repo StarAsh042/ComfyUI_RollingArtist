@@ -32,26 +32,34 @@ from typing import List, Optional, Sequence, Tuple
 try:  # pragma: no cover - 取决于运行方式
     from .danbooru_csv_tool import (
         backup_output,
-        convert as _convert,
         escape_paren,
         find_columns,
         normalize_header,
         read_rows,
-        run as _run,
         transform_text,
         write_rows,
+    )
+    from .danbooru_csv_tool import (
+        convert as _convert,
+    )
+    from .danbooru_csv_tool import (
+        run as _run,
     )
 except ImportError:  # pragma: no cover - 直接运行脚本时走这里
     from danbooru_csv_tool import (  # type: ignore[no-redef]
         backup_output,
-        convert as _convert,
         escape_paren,
         find_columns,
         normalize_header,
         read_rows,
-        run as _run,
         transform_text,
         write_rows,
+    )
+    from danbooru_csv_tool import (
+        convert as _convert,
+    )
+    from danbooru_csv_tool import (
+        run as _run,
     )
 
 NODE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -90,8 +98,7 @@ def column_indexes(header: Sequence[str]) -> dict:
     return find_columns(header, OUTPUT_COLUMNS)
 
 
-def convert(rows: Sequence[Sequence[str]],
-            min_count: int) -> Tuple[List[List[str]], dict]:
+def convert(rows: Sequence[Sequence[str]], min_count: int) -> Tuple[List[List[str]], dict]:
     """把源行转换为输出行（列裁剪、按 count 筛选、只转义 trigger）。"""
     return _convert(rows, min_count, OUTPUT_COLUMNS, ESCAPE_COLUMNS)
 
@@ -100,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="modify_danbooru_art.py",
         description="按 count 筛选 danbooru 画师 CSV，只保留 artist/trigger/count 三列，"
-                    "并只对 trigger 列做提示词转义。",
+        "并只对 trigger 列做提示词转义。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "示例：\n"
@@ -109,22 +116,35 @@ def build_parser() -> argparse.ArgumentParser:
             "  python modify_danbooru_art.py -i a.csv -o b.csv\n"
         ),
     )
-    parser.add_argument("-i", "--input", default=DEFAULT_INPUT,
-                        help="输入 CSV（默认 danbooru_art_full.csv）")
-    parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT,
-                        help="输出 CSV（默认 danbooru_art_001.csv，写回前自动备份为 .bak）")
-    parser.add_argument("-n", "--min-count", type=int, default=DEFAULT_MIN_COUNT,
-                        help=f"只保留 count 不小于该值的行（默认 {DEFAULT_MIN_COUNT}）")
-    parser.add_argument("--no-backup", action="store_true",
-                        help="写回前不生成 .bak 备份")
+    parser.add_argument("-i", "--input", default=DEFAULT_INPUT, help="输入 CSV（默认 danbooru_art_full.csv）")
+    parser.add_argument(
+        "-o",
+        "--output",
+        default=DEFAULT_OUTPUT,
+        help="输出 CSV（默认 danbooru_art_001.csv，写回前自动备份为 .bak）",
+    )
+    parser.add_argument(
+        "-n",
+        "--min-count",
+        type=int,
+        default=DEFAULT_MIN_COUNT,
+        help=f"只保留 count 不小于该值的行（默认 {DEFAULT_MIN_COUNT}）",
+    )
+    parser.add_argument("--no-backup", action="store_true", help="写回前不生成 .bak 备份")
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
-    return _run(args.input, args.output, args.min_count,
-                OUTPUT_COLUMNS, ESCAPE_COLUMNS, f"[{PROG}]",
-                backup=not args.no_backup)
+    return _run(
+        args.input,
+        args.output,
+        args.min_count,
+        OUTPUT_COLUMNS,
+        ESCAPE_COLUMNS,
+        f"[{PROG}]",
+        backup=not args.no_backup,
+    )
 
 
 if __name__ == "__main__":

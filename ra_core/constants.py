@@ -22,6 +22,10 @@ DEFAULT_CHARACTER_DB: Final[str] = os.path.join(NODE_DIR, "rollingcharacter.sqli
 # 记录类型标记：两个节点即使被指向同一个数据库，同名的画师与角色也不会互相冒充
 KIND_ARTIST: Final[str] = "artist"
 KIND_CHARACTER: Final[str] = "character"
+
+# 记录库的表结构版本。每次不兼容的结构变更 +1，并在 ra_core/db.py 的
+# _MIGRATIONS 里追加一段迁移函数。存放于 meta 表的 schema_version 键。
+SCHEMA_VERSION: Final[int] = 2
 # 旧版 CSV 记录文件在导入数据库后改名留底用的后缀
 LEGACY_BACKUP_SUFFIX: Final[str] = ".bak"
 
@@ -29,7 +33,7 @@ LEGACY_BACKUP_SUFFIX: Final[str] = ".bak"
 WEIGHT_STEP: Final[float] = 0.1
 # 权重保留的小数位数 / 整数化因子，用整数单位运算避免浮点累计误差
 WEIGHT_DECIMALS: Final[int] = 1
-WEIGHT_SCALE: Final[int] = 10 ** WEIGHT_DECIMALS
+WEIGHT_SCALE: Final[int] = 10**WEIGHT_DECIMALS
 
 # CSV 读取使用 utf-8-sig，自动兼容带 BOM 的文件；写入统一使用 utf-8
 CSV_READ_ENCODING: Final[str] = "utf-8-sig"

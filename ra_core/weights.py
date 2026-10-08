@@ -32,9 +32,7 @@ DEDUP_MODES = ("none", "full_prompt", "artist_set", "artist_list")
 WEIGHT_CURVES = ("flat", "dominant", "ramp")
 
 # 解析 "artist:name:0.8" / "(artist:name:0.8)" / "name" 这类片段
-_PROMPT_PART_RE = re.compile(
-    r"^\(*\s*(?:artist:)?\s*(.*?)\s*(?::\s*([0-9]*\.?[0-9]+))?\s*\)*$"
-)
+_PROMPT_PART_RE = re.compile(r"^\(*\s*(?:artist:)?\s*(.*?)\s*(?::\s*([0-9]*\.?[0-9]+))?\s*\)*$")
 _KEY_SEP = "|"
 
 
@@ -59,10 +57,7 @@ def _curve_desires(count: int, curve: str, rng: random.Random) -> List[float]:
         return []
     if curve == "dominant":
         main = rng.randrange(count)
-        return [
-            rng.uniform(2.2, 3.2) if index == main else rng.uniform(0.15, 0.6)
-            for index in range(count)
-        ]
+        return [rng.uniform(2.2, 3.2) if index == main else rng.uniform(0.15, 0.6) for index in range(count)]
     if curve == "ramp":
         order = list(range(count))
         rng.shuffle(order)
@@ -73,9 +68,14 @@ def _curve_desires(count: int, curve: str, rng: random.Random) -> List[float]:
     return [rng.uniform(0.5, 1.5) for _ in range(count)]
 
 
-def generate_weights(count: int, weight_min: float, weight_max: float,
-                     weight_total: float, rng: random.Random,
-                     curve: Optional[str] = None) -> List[float]:
+def generate_weights(
+    count: int,
+    weight_min: float,
+    weight_max: float,
+    weight_total: float,
+    rng: random.Random,
+    curve: Optional[str] = None,
+) -> List[float]:
     """生成满足约束的随机权重列表。
 
     约束（与节点界面描述一致）：
@@ -239,8 +239,7 @@ def dedup_key(mode: str, artists: Sequence[str], weights: Sequence[float]) -> st
     """
     if mode == "full_prompt":
         return _KEY_SEP.join(
-            f"{escape_key_part(artist)}:{round(float(weight), 1)}"
-            for artist, weight in zip(artists, weights)
+            f"{escape_key_part(artist)}:{round(float(weight), 1)}" for artist, weight in zip(artists, weights)
         )
     if mode == "artist_set":
         return _KEY_SEP.join(sorted(escape_key_part(name) for name in set(artists)))

@@ -97,128 +97,179 @@ class RollingArtist:
         return {
             "required": {
                 # ---------------- 抽样：抽几个人、从哪里抽 ----------------
-                "artist_count": ("INT", {
-                    "default": 3,
-                    "min": 1,
-                    "max": 10,
-                    "step": 1,
-                    "display": "slider",
-                    "tooltip": "每次生成的艺术家数量（1-10），设为 1 就是随机抽 1 个"
-                }),
-                "artist_top_ratio": ("FLOAT", {
-                    "default": 0.01,
-                    "min": 0.01,
-                    "max": 1.0,
-                    "step": 0.01,
-                    "display": "slider",
-                    "tooltip": "Top 池占比（0.01-1.0）：按 CSV 行序取前 ceil(总数×比例) 个（至少 1 个）作为 Top 池，"
-                               "行序越靠前的艺术家通常作品越多"
-                }),
-                "artist_top_count": ("INT", {
-                    "default": 1,
-                    "min": 1,
-                    "max": 10,
-                    "step": 1,
-                    "display": "slider",
-                    "tooltip": "每次至少抽取几个 Top 池艺术家（1-10）；"
-                               "仅在“Top 优先抽样”开启且 Top 池非空时生效"
-                }),
+                "artist_count": (
+                    "INT",
+                    {
+                        "default": 3,
+                        "min": 1,
+                        "max": 10,
+                        "step": 1,
+                        "display": "slider",
+                        "tooltip": "每次生成的艺术家数量（1-10），设为 1 就是随机抽 1 个",
+                    },
+                ),
+                "artist_top_ratio": (
+                    "FLOAT",
+                    {
+                        "default": 0.01,
+                        "min": 0.01,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "display": "slider",
+                        "tooltip": "Top 池占比（0.01-1.0）：按 CSV 行序取前 ceil(总数×比例) 个（至少 1 个）作为 Top 池，"
+                        "行序越靠前的艺术家通常作品越多",
+                    },
+                ),
+                "artist_top_count": (
+                    "INT",
+                    {
+                        "default": 1,
+                        "min": 1,
+                        "max": 10,
+                        "step": 1,
+                        "display": "slider",
+                        "tooltip": "每次至少抽取几个 Top 池艺术家（1-10）；"
+                        "仅在“Top 优先抽样”开启且 Top 池非空时生效",
+                    },
+                ),
                 # ---------------- 权重：范围与总和 ----------------
-                "weight_min": ("FLOAT", {
-                    "default": 0.2,
-                    "min": 0.1,
-                    "max": 2.0,
-                    "step": 0.1,
-                    "display": "slider",
-                    "tooltip": "单个艺术家的权重下限（步长 0.1）；与上限写反时自动交换，负数会被夹到 0"
-                }),
-                "weight_max": ("FLOAT", {
-                    "default": 1.0,
-                    "min": 0.1,
-                    "max": 2.0,
-                    "step": 0.1,
-                    "display": "slider",
-                    "tooltip": "单个艺术家的权重上限（步长 0.1）；每个权重都落在上限与下限之间"
-                }),
-                "weight_total": ("FLOAT", {
-                    "default": 2.0,
-                    "min": 0.0,
-                    "max": 20.0,
-                    "step": 0.5,
-                    "display": "slider",
-                    "tooltip": "所有权重之和（步长 0.5），按总和精确分配，超出可行区间时夹到边界"
-                }),
-                "weight_curve": (["flat", "dominant", "ramp"], {
-                    "default": "flat",
-                    "tooltip": "权重分配曲线，只影响“谁分得多”，不影响上下限与总和。"
-                               "flat=平坦（现状，各位权重接近，风格平均混合）；"
-                               "dominant=主次分明（随机一位当主风格，权重明显更高）；"
-                               "ramp=阶梯（按随机名次递减）"
-                }),
+                "weight_min": (
+                    "FLOAT",
+                    {
+                        "default": 0.2,
+                        "min": 0.1,
+                        "max": 2.0,
+                        "step": 0.1,
+                        "display": "slider",
+                        "tooltip": "单个艺术家的权重下限（步长 0.1）；与上限写反时自动交换，负数会被夹到 0",
+                    },
+                ),
+                "weight_max": (
+                    "FLOAT",
+                    {
+                        "default": 1.0,
+                        "min": 0.1,
+                        "max": 2.0,
+                        "step": 0.1,
+                        "display": "slider",
+                        "tooltip": "单个艺术家的权重上限（步长 0.1）；每个权重都落在上限与下限之间",
+                    },
+                ),
+                "weight_total": (
+                    "FLOAT",
+                    {
+                        "default": 2.0,
+                        "min": 0.0,
+                        "max": 20.0,
+                        "step": 0.5,
+                        "display": "slider",
+                        "tooltip": "所有权重之和（步长 0.5），按总和精确分配，超出可行区间时夹到边界",
+                    },
+                ),
+                "weight_curve": (
+                    ["flat", "dominant", "ramp"],
+                    {
+                        "default": "flat",
+                        "tooltip": "只影响“谁分得多”，不影响上下限与总和。"
+                        "flat=平坦（现状，各位权重接近，风格平均混合）；"
+                        "dominant=主次分明（随机一位当主风格，权重明显更高）；"
+                        "ramp=阶梯（按随机名次递减）",
+                    },
+                ),
                 # ---------------- 输出形式与随机性 ----------------
-                "artists_prefix": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "开启时输出 artist:名称（例如 (artist:xxx:0.8)），关闭时只输出名称本身"
-                }),
-                "seed": ("INT", {
-                    "default": 1234,
-                    "min": 0,
-                    "max": 4294967295,
-                    "tooltip": "随机种子。同一种子在同一组参数下结果可复现；"
-                               "去重模式与重试次数会改变实际的抽样序列"
-                }),
+                "artists_prefix": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "开启时输出 artist:名称（例如 (artist:xxx:0.8)），关闭时只输出名称本身",
+                    },
+                ),
+                "seed": (
+                    "INT",
+                    {
+                        "default": 1234,
+                        "min": 0,
+                        "max": 4294967295,
+                        "tooltip": "随机种子。同一种子在同一组参数下结果可复现；"
+                        "去重模式与重试次数会改变实际的抽样序列",
+                    },
+                ),
             },
             "optional": {
                 # ---------------- 抽样偏好 ----------------
-                "use_top_priority": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "开启时优先从 Top 池抽人，并保证含 artist_top_count 个 Top 艺术家；"
-                               "关闭时从完整 CSV 均匀抽样"
-                }),
-                "sort_by_weight": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "开启时按权重从高到低重排提示词里的艺术家顺序；"
-                               "顺序会影响 full_prompt 去重键"
-                }),
+                "use_top_priority": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "开启时优先从 Top 池抽人，并保证含 artist_top_count 个 Top 艺术家；"
+                        "关闭时从完整 CSV 均匀抽样",
+                    },
+                ),
+                "sort_by_weight": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "开启时按权重从高到低重排提示词里的艺术家顺序；"
+                        "顺序会影响 full_prompt 去重键",
+                    },
+                ),
                 # ---------------- 名单 ----------------
-                "exclude_artists": ("STRING", {
-                    "default": "",
-                    "tooltip": "要排除的艺术家名，英文逗号分隔（例如 a,b,c）；被排除的名字不会出现在结果中"
-                }),
-                "force_include": ("STRING", {
-                    "default": "",
-                    "tooltip": "必须出现的艺术家名，英文逗号分隔；优先级高于“排除艺术家”，"
-                               "数量达到 artist_count 时直接从中随机抽取"
-                }),
+                "exclude_artists": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": "要排除的艺术家名，英文逗号分隔（例如 a,b,c）；被排除的名字不会出现在结果中",
+                    },
+                ),
+                "force_include": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": "必须出现的艺术家名，英文逗号分隔；优先级高于“排除艺术家”，"
+                        "数量达到 artist_count 时直接从中随机抽取",
+                    },
+                ),
                 # ---------------- 去重 ----------------
-                "dedup_mode": (["none", "full_prompt", "artist_set", "artist_list"], {
-                    "default": "none",
-                    "tooltip": "去重依据：none=只记录不判重；full_prompt=艺术家顺序与权重完全一致；"
-                               "artist_set=艺术家集合一致（忽略顺序与权重）；"
-                               "artist_list=排序后的名字一致（忽略权重）"
-                }),
-                "max_attempts": ("INT", {
-                    "default": 10,
-                    "min": 1,
-                    "max": 100,
-                    "step": 1,
-                    "tooltip": "去重模式下的最大重试次数（1-100）；重试后仍全部命中已测组合时接受最后一次结果，"
-                               "并输出 WARNING 日志"
-                }),
+                "dedup_mode": (
+                    ["none", "full_prompt", "artist_set", "artist_list"],
+                    {
+                        "default": "none",
+                        "tooltip": "去重依据：none=只记录不判重；full_prompt=艺术家顺序与权重完全一致；"
+                        "artist_set=艺术家集合一致（忽略顺序与权重）；"
+                        "artist_list=排序后的名字一致（忽略权重）",
+                    },
+                ),
+                "max_attempts": (
+                    "INT",
+                    {
+                        "default": 10,
+                        "min": 1,
+                        "max": 100,
+                        "step": 1,
+                        "tooltip": "去重模式下的最大重试次数（1-100）；重试后仍全部命中已测组合时接受最后一次结果，"
+                        "并输出 WARNING 日志",
+                    },
+                ),
                 # ---------------- 高级：CSV 与数据库（界面默认折叠） ----------------
-                "custom_csv_path": ("STRING", {
-                    "default": "",
-                    "advanced": True,
-                    "tooltip": "自定义艺术家 CSV 的路径；留空使用节点目录下的 danbooru_art_001.csv"
-                }),
-                "tested_db_path": ("STRING", {
-                    "default": "",
-                    "advanced": True,
-                    "tooltip": "记录数据库（SQLite）路径；留空使用节点目录下的 rollingartist.sqlite。"
-                               "已测记录存在这里，更换该路径相当于重置去重进度。"
-                               "默认路径的数据库每次启动会被清理，要跨会话保留请显式指定"
-                }),
-            }
+                "custom_csv_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "advanced": True,
+                        "tooltip": "自定义艺术家 CSV 的路径；留空使用节点目录下的 danbooru_art_001.csv",
+                    },
+                ),
+                "tested_db_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "advanced": True,
+                        "tooltip": "记录数据库（SQLite）路径；留空使用节点目录下的 rollingartist.sqlite。"
+                        "已测记录存在这里，更换该路径相当于重置去重进度。"
+                        "默认路径的数据库每次启动会被清理，要跨会话保留请显式指定",
+                    },
+                ),
+            },
         }
 
     RETURN_TYPES = ("STRING", "STRING", "STRING")
@@ -258,13 +309,13 @@ class RollingArtist:
     def top_pool(self) -> List[str]:
         """Top 艺术家列表（按当前 Top 数量惰性切片）。"""
         with self._lock:
-            return self.artists[:self.top_count]
+            return self.artists[: self.top_count]
 
     @property
     def non_top_pool(self) -> List[str]:
         """非 Top 艺术家列表（按当前 Top 数量惰性切片）。"""
         with self._lock:
-            return self.artists[self.top_count:]
+            return self.artists[self.top_count :]
 
     def load_artists(self, csv_path: Optional[str] = None, column: str = "trigger") -> List[str]:
         """加载（并按文件修改时间缓存）艺术家列表。"""
@@ -280,24 +331,35 @@ class RollingArtist:
             self.top_count = compute_top_count(len(self.artists), top_ratio)
             return self.top_count
 
-    def generate_fixed_weights(self, count: int, weight_min: float, weight_max: float,
-                               weight_total: float, rng: random.Random) -> List[float]:
+    def generate_fixed_weights(
+        self, count: int, weight_min: float, weight_max: float, weight_total: float, rng: random.Random
+    ) -> List[float]:
         """（兼容保留）生成符合约束的权重列表。"""
         return generate_weights(count, weight_min, weight_max, weight_total, rng)
 
     # ------------------------------------------------------------------
     # 主流程
     # ------------------------------------------------------------------
-    def generate_artists(self, artist_count: int, artist_top_count: int,
-                         artist_top_ratio: float, artists_prefix: bool,
-                         weight_min: float, weight_max: float,
-                         weight_total: float, seed: int,
-                         custom_csv_path: str = "", exclude_artists: str = "",
-                         sort_by_weight: bool = True, use_top_priority: bool = True,
-                         force_include: str = "", dedup_mode: str = "none",
-                         max_attempts: int = 10,
-                         weight_curve: str = "flat",
-                         tested_db_path: str = "") -> Tuple[str, str, str]:
+    def generate_artists(
+        self,
+        artist_count: int,
+        artist_top_count: int,
+        artist_top_ratio: float,
+        artists_prefix: bool,
+        weight_min: float,
+        weight_max: float,
+        weight_total: float,
+        seed: int,
+        custom_csv_path: str = "",
+        exclude_artists: str = "",
+        sort_by_weight: bool = True,
+        use_top_priority: bool = True,
+        force_include: str = "",
+        dedup_mode: str = "none",
+        max_attempts: int = 10,
+        weight_curve: str = "flat",
+        tested_db_path: str = "",
+    ) -> Tuple[str, str, str]:
         """生成艺术家提示词。
 
         形参顺序是给外部脚本按位置调用的接口（与 ``INPUT_TYPES`` 的界面顺序无关，
@@ -331,9 +393,7 @@ class RollingArtist:
         # 2) 参数规范化（兼容 API 直接传入 None / 字符串的情况）
         exclude_set = set(split_names(exclude_artists))
         force_list = split_names(force_include)
-        candidates = artists if not exclude_set else [
-            name for name in artists if name not in exclude_set
-        ]
+        candidates = artists if not exclude_set else [name for name in artists if name not in exclude_set]
         if not candidates and not force_list:
             raise ValueError("[RollingArtist] exclude_artists 排除了全部艺术家，无可用艺术家")
 
@@ -359,8 +419,12 @@ class RollingArtist:
             for attempt in range(attempts):
                 rng = random.Random(rng_seed + attempt)
                 selected = select_artists(
-                    rng, count, _as_int(artist_top_count, 1), force_list,
-                    artists, top_count if _as_bool(use_top_priority, True) else 0,
+                    rng,
+                    count,
+                    _as_int(artist_top_count, 1),
+                    force_list,
+                    artists,
+                    top_count if _as_bool(use_top_priority, True) else 0,
                     exclude_set,
                 )
                 if not selected:
@@ -369,7 +433,8 @@ class RollingArtist:
                     LOGGER.warning(
                         "[RollingArtist] 可用艺术家不足：请求 %d 个，实际选中 %d 个"
                         "（请检查 artist_count、排除名单或 CSV 规模）",
-                        count, len(selected),
+                        count,
+                        len(selected),
                     )
 
                 weights = generate_weights(len(selected), low, high, total, rng, weight_curve)
@@ -393,24 +458,30 @@ class RollingArtist:
             if dedup != "none" and db.is_tested(dedup, selected, weights, KIND_ARTIST):
                 LOGGER.warning(
                     "[RollingArtist] 已试 %d 次均命中已测组合（dedup_mode=%s），返回重复结果: %s",
-                    attempts, dedup, prompt,
+                    attempts,
+                    dedup,
+                    prompt,
                 )
             if not db.record(selected, weights, prompt, KIND_ARTIST):
                 LOGGER.error(
-                    "[RollingArtist] 已测记录写入数据库失败(%s)，本次组合未落盘，"
-                    "后续可能重复生成: %s",
-                    db.path, prompt,
+                    "[RollingArtist] 已测记录写入数据库失败(%s)，本次组合未落盘，后续可能重复生成: %s",
+                    db.path,
+                    prompt,
                 )
+            # 在事务内取计数：与本次写入处于同一快照，避免事务外再查导致
+            # 「显示的数量」与「刚写入的结果」不一致
+            tested_total = db.count(KIND_ARTIST)
 
         payload = self._build_payload(selected, weights, artists, top_count)
-        return prompt, json.dumps(payload, ensure_ascii=False), str(db.count(KIND_ARTIST))
+        return prompt, json.dumps(payload, ensure_ascii=False), str(tested_total)
 
     # ------------------------------------------------------------------
     # 内部实现
     # ------------------------------------------------------------------
     @staticmethod
-    def _build_payload(selected: List[str], weights: List[float],
-                       artists: List[str], top_count: int) -> Dict[str, Any]:
+    def _build_payload(
+        selected: List[str], weights: List[float], artists: List[str], top_count: int
+    ) -> Dict[str, Any]:
         """组装结构化输出：艺术家 / 权重 / 是否 Top / 状态。"""
         # top_count >= 总数时全员都是 Top，无需构建集合（大 CSV 下可省下可观内存）
         top_names: Optional[Set[str]] = None

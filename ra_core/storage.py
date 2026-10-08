@@ -39,7 +39,7 @@ def read_rows(path: str) -> List[List[str]]:
     if not os.path.isfile(path):
         return []
     try:
-        with open(path, "r", encoding=CSV_READ_ENCODING, newline="") as handle:
+        with open(path, encoding=CSV_READ_ENCODING, newline="") as handle:
             return [row for row in csv.reader(handle) if row]
     except (OSError, csv.Error, UnicodeDecodeError) as error:
         LOGGER.error("[RollingArtist] CSV 读取失败: %s -> %s", path, error)

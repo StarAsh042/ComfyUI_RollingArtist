@@ -13,6 +13,7 @@
 
 from .artists import (
     ArtistRepository,
+    available_names,
     clear_repositories,
     compute_top_count,
     get_artist_repository,
@@ -53,6 +54,14 @@ from .constants import (
 )
 from .db import RollingArtistDB, close_all_dbs, get_db, resolve_db_path
 from .params import as_bool, as_float, as_int, as_text
+from .paths import (
+    PathNotAllowedError,
+    check_csv_path,
+    check_db_path,
+    check_path,
+    forbidden_roots,
+    is_path_guard_disabled,
+)
 from .startup import cleanup_default_runtime_files, default_runtime_files
 from .storage import backup_file, parse_tested_row, read_rows
 from .weights import (
@@ -70,6 +79,7 @@ from .weights import (
 __all__ = [
     # artists
     "ArtistRepository",
+    "available_names",
     "clear_repositories",
     "compute_top_count",
     "get_artist_repository",
@@ -117,6 +127,13 @@ __all__ = [
     "as_text",
     "cleanup_default_runtime_files",
     "default_runtime_files",
+    # paths
+    "PathNotAllowedError",
+    "check_csv_path",
+    "check_db_path",
+    "check_path",
+    "forbidden_roots",
+    "is_path_guard_disabled",
     "backup_file",
     "parse_tested_row",
     "read_rows",

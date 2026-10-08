@@ -6,16 +6,20 @@ RollingArtist.py / RollingCharacter.py 与 ra_core 之间的相对导入因此�
 
 本包提供两个节点：
 
-- ``RollingArtist``：从艺术家 CSV 抽人 + 随机权重
-- ``RollingCharacter``：从角色 CSV 抽人 + 随机权重，额外带作品标签与外观标签
+- ``RollingArtist``：从艺术家 CSV 抽人 + 分配随机权重
+- ``RollingCharacter``：从角色 CSV 抽人（**不带权重**），额外带作品标签与角色描述
 """
 
 from .RollingArtist import (
     NODE_CLASS_MAPPINGS as _ARTIST_NODES,
+)
+from .RollingArtist import (
     NODE_DISPLAY_NAME_MAPPINGS as _ARTIST_NAMES,
 )
 from .RollingCharacter import (
     NODE_CLASS_MAPPINGS as _CHARACTER_NODES,
+)
+from .RollingCharacter import (
     NODE_DISPLAY_NAME_MAPPINGS as _CHARACTER_NAMES,
 )
 

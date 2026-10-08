@@ -56,13 +56,19 @@ COPYRIGHT_ANY = "(不限)"
 
 
 class CharacterRecord(NamedTuple):
-    """一位角色及其附带信息（不可变、内存开销小，适合缓存几万条）。"""
+    """一位角色及其附带信息（不可变、内存开销小，适合缓存几万条）。
 
-    name: str          # 角色名（名字列的第 1 段，已转义）
-    extra_tags: str    # 名字列的其余段（作品标签等，已转义，逗号连接）
-    copyright: str     # copyright 列原值（用于筛选与 JSON，保留原始写法）
-    core_tags: str     # core_tags 列原值（角色固定外观标签）
-    count: int         # 热度（缺失或非法时为 0）
+    字段名用 ``post_count`` 而非 ``count``：``NamedTuple`` 继承自 ``tuple``，
+    而 ``tuple`` 已有 ``count`` 方法，同名会遮蔽它并让类型检查器报错
+    （``CharacterRecord.count`` 与 ``tuple.count`` 类型不兼容）。
+    对外的 JSON 字段仍叫 ``count``，保持输出兼容。
+    """
+
+    name: str  # 角色名（名字列的第 1 段，已转义）
+    extra_tags: str  # 名字列的其余段（作品标签等，已转义，逗号连接）
+    copyright: str  # copyright 列原值（用于筛选与 JSON，保留原始写法）
+    core_tags: str  # core_tags 列原值（角色固定外观标签）
+    post_count: int  # 热度（缺失或非法时为 0）
 
 
 # ----------------------------------------------------------------------
@@ -115,8 +121,7 @@ def _cell(row: Sequence[str], index: Optional[int]) -> str:
     return str(row[index]).strip()
 
 
-def build_records(rows: Sequence[Sequence[str]],
-                  column: Optional[str] = "trigger") -> List[CharacterRecord]:
+def build_records(rows: Sequence[Sequence[str]], column: Optional[str] = "trigger") -> List[CharacterRecord]:
     """把 CSV 行解析成角色记录列表。
 
     参数:
@@ -160,13 +165,15 @@ def build_records(rows: Sequence[Sequence[str]],
         if not segments:
             continue
         raw_count = _cell(row, aux.get("count"))
-        records.append(CharacterRecord(
-            name=segments[0],
-            extra_tags=",".join(segments[1:]),
-            copyright=_cell(row, aux.get("copyright")),
-            core_tags=_cell(row, aux.get("core_tags")),
-            count=int(raw_count) if raw_count.isdigit() else 0,
-        ))
+        records.append(
+            CharacterRecord(
+                name=segments[0],
+                extra_tags=",".join(segments[1:]),
+                copyright=_cell(row, aux.get("copyright")),
+                core_tags=_cell(row, aux.get("core_tags")),
+                post_count=int(raw_count) if raw_count.isdigit() else 0,
+            )
+        )
     return records
 
 
@@ -186,8 +193,7 @@ def parse_copyright_filter(text: Optional[str]) -> List[str]:
     return names
 
 
-def filter_by_copyright(records: Sequence[CharacterRecord],
-                        text: Optional[str]) -> List[int]:
+def filter_by_copyright(records: Sequence[CharacterRecord], text: Optional[str]) -> List[int]:
     """按作品名筛选，返回允许的记录下标（空过滤串返回全部）。
 
     同时接受 ``copyright`` 列的原始写法（``fate_(series)``）与
@@ -220,7 +226,7 @@ def copyright_options(records: Sequence[CharacterRecord]) -> List[str]:
     for record in records:
         name = record.copyright.strip()
         if name:
-            totals[name] = totals.get(name, 0) + record.count
+            totals[name] = totals.get(name, 0) + record.post_count
     ordered = sorted(totals.items(), key=lambda item: (-item[1], item[0]))
     return [name for name, _ in ordered]
 
@@ -239,8 +245,7 @@ def unique_tags(tags: Iterable[str]) -> List[str]:
     return merged
 
 
-def build_character_prompt(records: Sequence[CharacterRecord],
-                           include_core_tags: bool = True) -> str:
+def build_character_prompt(records: Sequence[CharacterRecord], include_core_tags: bool = True) -> str:
     """组装角色输出：**每个角色一行**，格式为 ``角色标签,作品标签,core_tags``。
 
     - 不带权重：角色标签直接输出，不套 ``(名称:权重)``
@@ -269,8 +274,7 @@ def build_character_prompt(records: Sequence[CharacterRecord],
 # ----------------------------------------------------------------------
 # 输出组装
 # ----------------------------------------------------------------------
-def build_payload(records: Sequence[CharacterRecord],
-                  top_names: Optional[Set[str]]) -> Dict[str, Any]:
+def build_payload(records: Sequence[CharacterRecord], top_names: Optional[Set[str]]) -> Dict[str, Any]:
     """组装 ``characters_json``：角色标签 / 作品 / 是否 Top / 热度 / 外观标签。"""
     return {
         "characters": [
@@ -278,7 +282,7 @@ def build_payload(records: Sequence[CharacterRecord],
                 "name": record.name,
                 "copyright": record.copyright,
                 "top": top_names is None or record.name in top_names,
-                "count": record.count,
+                "count": record.post_count,
                 "core_tags": unique_tags(split_core_tags(record.core_tags)),
             }
             for record in records
@@ -297,8 +301,9 @@ _RECORDS_LOCK = threading.RLock()
 _MAX_RECORDS_CACHE = 4
 
 
-def load_records(repository: ArtistRepository, custom_path: Optional[str] = None,
-                 column: Optional[str] = "trigger") -> List[CharacterRecord]:
+def load_records(
+    repository: ArtistRepository, custom_path: Optional[str] = None, column: Optional[str] = "trigger"
+) -> List[CharacterRecord]:
     """读取并缓存角色记录（内容未变化时直接命中缓存）。"""
     rows, stat = repository.load_rows(custom_path)
     if stat is None:

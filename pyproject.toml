@@ -1,14 +1,14 @@
 [project]
 name = "ComfyUI_RollingArtist"
 description = "RollingArtist is a ComfyUI node designed to generate artist prompt texts with random weights, suitable for text-to-image generation models. The node reads an artist list from a CSV file and generates combined prompts based on the parameters."
-version = "4.1.0"
+version = "4.2.0"
 license = {file = "LICENSE"}
 requires-python = ">=3.8"
 dynamic = ["dependencies"]
 
 [project.optional-dependencies]
 # 运行测试用：pip install -e ".[dev]" 然后 pytest
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "ruff>=0.6", "mypy>=1.10"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
@@ -16,6 +16,37 @@ dependencies = {file = ["requirements.txt"]}
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py38"
+# 一次性文档生成脚本不属于包内代码，不纳入 lint
+extend-exclude = ["web/docs/_build_report_html.py"]
+
+[tool.ruff.lint]
+# E/F：pyflakes + pycodestyle 基础规则；I：import 排序；UP：pyupgrade
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # 行长由 line-length 控制，中文注释不强制折行
+    "E741",  # 允许 l / I 这类单字符名（本项目有 index/i 等局部变量）
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # 测试里允许 assert False 之类的写法
+
+[tool.mypy]
+# 本项目的语法只用到 3.8 特性，但 mypy 自 1.8 起最低支持 3.10 的 python_version，
+# 因此按 3.10 检查（不影响实际运行的兼容性下限）
+python_version = "3.10"
+# 渐进式收紧：先只检查明显错误，不要求所有函数都有标注
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+# 测试与加工脚本先不强制类型检查，避免噪音掩盖真实问题
+module = ["tests.*", "modify_danbooru_art", "modify_danbooru_character", "danbooru_csv_tool", "prestartup_script"]
+ignore_errors = true
 
 [project.urls]
 Repository = "https://github.com/StarAsh042/ComfyUI_RollingArtist"

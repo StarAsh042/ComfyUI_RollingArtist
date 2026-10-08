@@ -12,9 +12,10 @@ import random
 import threading
 from collections import OrderedDict
 from itertools import chain
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from .constants import CSV_READ_ENCODING, DEFAULT_ARTIST_CSV, LOGGER
+from .paths import check_csv_path
 
 __all__ = [
     "ArtistRepository",
@@ -26,16 +27,45 @@ __all__ = [
     "resolve_layout",
     "compute_top_count",
     "select_artists",
+    "available_names",
     "split_names",
 ]
 
+# CSV 文件大小保护：超过该阈值时给出 WARNING（整表载入内存可能拖垮进程）
+CSV_SIZE_WARN_BYTES = 100 * 1024 * 1024
+
+# 单次读取的最大行数（None = 不限制）。留作紧急护栏，默认不启用
+CSV_MAX_ROWS: Optional[int] = None
+
 # 被识别为表头的单元格（小写、空格/短横线归一为下划线后比较）
-HEADER_TOKENS = frozenset({
-    "artist", "artists", "character", "characters", "name", "names",
-    "tag", "tags", "token", "tokens", "trigger", "triggers",
-    "count", "post_count", "solo_count", "url", "id", "copyright",
-    "core_tags", "category", "source", "notes", "description", "sample",
-})
+HEADER_TOKENS = frozenset(
+    {
+        "artist",
+        "artists",
+        "character",
+        "characters",
+        "name",
+        "names",
+        "tag",
+        "tags",
+        "token",
+        "tokens",
+        "trigger",
+        "triggers",
+        "count",
+        "post_count",
+        "solo_count",
+        "url",
+        "id",
+        "copyright",
+        "core_tags",
+        "category",
+        "source",
+        "notes",
+        "description",
+        "sample",
+    }
+)
 
 # auto 模式下按优先级挑选的列名。
 # 顺序说明：
@@ -45,8 +75,15 @@ HEADER_TOKENS = frozenset({
 #   （空格与括号已转义，见 modify_danbooru_art.py），而 artist 列是 danbooru 原始标签，
 #   可能带未转义括号（会破坏权重语法）
 COLUMN_PRIORITY = (
-    "character", "characters", "trigger",
-    "artist", "artists", "name", "names", "tag", "tags",
+    "character",
+    "characters",
+    "trigger",
+    "artist",
+    "artists",
+    "name",
+    "names",
+    "tag",
+    "tags",
 )
 
 COLUMN_ALL = "all"
@@ -96,7 +133,8 @@ def resolve_layout(sample_row: Sequence[str], spec: str, has_header: bool):
             return index
         LOGGER.warning(
             "[RollingArtist] csv_column=%s 超出 CSV 列数(%d)，回退到首列",
-            spec, len(sample_row),
+            spec,
+            len(sample_row),
         )
         return 0
     if has_header and spec in cells:
@@ -105,8 +143,7 @@ def resolve_layout(sample_row: Sequence[str], spec: str, has_header: bool):
     return 0
 
 
-def parse_artist_rows(rows: Iterable[Sequence[str]],
-                      column: Optional[str] = COLUMN_AUTO) -> List[str]:
+def parse_artist_rows(rows: Iterable[Sequence[str]], column: Optional[str] = COLUMN_AUTO) -> List[str]:
     """从 CSV 行迭代器中解析艺术家名列表。
 
     参数:
@@ -135,7 +172,16 @@ def parse_artist_rows(rows: Iterable[Sequence[str]],
     artists: List[str] = []
     # 首行不是表头时它本身就是数据行，需要一并处理
     body = iterator if has_header else chain((first,), iterator)
+    consumed = 0
     for row in body:
+        if CSV_MAX_ROWS is not None and consumed >= CSV_MAX_ROWS:
+            LOGGER.warning(
+                "[RollingArtist] CSV 行数达到上限 %d 已截断（parse_artist_rows）"
+                "（如需读取全部内容，请调大 CSV_MAX_ROWS）",
+                CSV_MAX_ROWS,
+            )
+            break
+        consumed += 1
         if not row:
             continue
         if layout == COLUMN_ALL:
@@ -162,16 +208,23 @@ class ArtistRepository:
     def __init__(self, default_path: str = DEFAULT_ARTIST_CSV) -> None:
         self.default_path = default_path
         self._lock = threading.RLock()
-        self._cache: "OrderedDict[Tuple[str, str, int, int], List[str]]" = OrderedDict()
-        self._rows_cache: "OrderedDict[Tuple[str, int, int], List[List[str]]]" = OrderedDict()
+        self._cache: OrderedDict[Tuple[str, str, int, int], List[str]] = OrderedDict()
+        self._rows_cache: OrderedDict[Tuple[str, int, int], List[List[str]]] = OrderedDict()
 
     # ------------------------------------------------------------------
     # 加载
     # ------------------------------------------------------------------
     def resolve_path(self, custom_path: Optional[str]) -> str:
-        """空路径回退到默认 CSV；否则使用用户指定的路径。"""
+        """空路径回退到默认 CSV；否则校验用户路径并规范化。
+
+        用户路径会经过 :func:`ra_core.paths.check_csv_path` 防护：
+        命中系统 / 凭据 / 源码等受保护目录时抛出 ``PathNotAllowedError``
+        （继承 ``ValueError``），避免节点被用作任意文件读取的跳板。
+        """
         path = str(custom_path or "").strip().strip('"')
-        return path or self.default_path
+        if not path:
+            return self.default_path
+        return check_csv_path(path)
 
     def stat_key(self, path: str) -> Optional[Tuple[str, int, int]]:
         """返回 (规范化绝对路径, 修改时间, 大小)；文件不可用时返回 None。"""
@@ -181,8 +234,76 @@ class ArtistRepository:
             return None
         return (os.path.normcase(os.path.abspath(path)), info.st_mtime_ns, info.st_size)
 
-    def load(self, custom_path: Optional[str] = None,
-             column: Optional[str] = COLUMN_AUTO) -> Tuple[List[str], Optional[Tuple[str, int, int]]]:
+    @staticmethod
+    def _warn_if_huge(path: str, size: int) -> None:
+        """整表载入前检查文件体积，过大时给出可操作的告警（不阻断）。"""
+        if size > CSV_SIZE_WARN_BYTES:
+            LOGGER.warning(
+                "[RollingArtist] CSV 体积较大（%.1f MB）：%s。"
+                "整表载入内存可能导致占用过高，建议先用数据加工脚本裁剪，"
+                "或确认机器内存充足",
+                size / 1048576,
+                path,
+            )
+
+    def _open_csv(self, path: str):
+        """打开 CSV 供逐行消费；体积告警与**打开期**异常集中在这里处理。
+
+        返回文件句柄（调用方负责 ``with`` 关闭）；文件不存在、是目录或其它 IO
+        异常时记日志并返回 ``None``，由调用方决定"空结果"的语义。
+
+        这里**不**捕获 ``UnicodeDecodeError``：``open()`` 只拿文件描述符、
+        不读内容，因此不可能抛解码错误。实测确认——写入 ``\\xff\\xfe`` 非法字节后
+        ``open(encoding='utf-8')`` 正常返回，错误要到迭代行时才抛。
+        读取期的解码/CSV 错误由 :meth:`_csv_rows` 统一兜底。
+        """
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        if size:
+            self._warn_if_huge(path, size)
+        try:
+            return open(path, encoding=CSV_READ_ENCODING, newline="")
+        except FileNotFoundError:
+            LOGGER.error("[RollingArtist] CSV 文件不存在: %s", path)
+        except IsADirectoryError:
+            LOGGER.error("[RollingArtist] CSV 路径是目录: %s", path)
+        except OSError as error:
+            LOGGER.error("[RollingArtist] CSV 打开失败: %s -> %s", path, error)
+        return None
+
+    def _cached_load(self, cache: "OrderedDict", cache_key, reader: Callable[[], List]):
+        """「查缓存 -> 未命中则读 -> 写回缓存 -> LRU 淘汰」的通用骨架。
+
+        :meth:`load`（键含列规格）与 :meth:`load_rows`（键为文件签名）此前各写了一份
+        逐字相同的缓存骨架；差异只在缓存容器与键，因此抽到这里，用一个 ``reader``
+        回调承接"怎么读"。行为完全不变：
+
+        - 命中时把键移到 LRU 末尾（最近使用）
+        - **读取结果为空时不写缓存**（空结果常来自瞬时 IO 失败，缓存它会让
+          文件恢复后仍然返回空，直到签名变化）
+        - 超过 :data:`_MAX_CACHE` 时淘汰最久未使用的键
+        """
+        with self._lock:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                cache.move_to_end(cache_key)
+                return cached
+
+        value = reader()
+
+        if value and cache_key is not None:
+            with self._lock:
+                cache[cache_key] = value
+                cache.move_to_end(cache_key)
+                while len(cache) > self._MAX_CACHE:
+                    cache.popitem(last=False)
+        return value
+
+    def load(
+        self, custom_path: Optional[str] = None, column: Optional[str] = COLUMN_AUTO
+    ) -> Tuple[List[str], Optional[Tuple[str, int, int]]]:
         """加载艺术家列表，返回 ``(artists, stat_key)``。
 
         失败时返回空列表并记录日志，不抛出异常，由调用方决定如何报错。
@@ -192,45 +313,61 @@ class ArtistRepository:
         stat_key = self.stat_key(path)
         cache_key = (stat_key[0], spec, stat_key[1], stat_key[2]) if stat_key else None
 
-        if cache_key is not None:
-            with self._lock:
-                cached = self._cache.get(cache_key)
-                if cached is not None:
-                    self._cache.move_to_end(cache_key)
-                    return cached, stat_key
-
-        artists = self._read(path, spec)
-
-        if cache_key is not None and artists:
-            with self._lock:
-                self._cache[cache_key] = artists
-                self._cache.move_to_end(cache_key)
-                while len(self._cache) > self._MAX_CACHE:
-                    self._cache.popitem(last=False)
+        if cache_key is None:
+            return self._read(path, spec), stat_key
+        artists = self._cached_load(self._cache, cache_key, lambda: self._read(path, spec))
         return artists, stat_key
 
-    def _read(self, path: str, spec: str) -> List[str]:
+    def _csv_rows(self, path: str, max_rows: Optional[int] = None) -> List[List[str]]:
+        """读取整份 CSV 为行列表（丢弃空行）；任何失败都记日志并返回空列表。
+
+        这是两条读取路径（:meth:`_read` / :meth:`_read_rows`）的公共入口，
+        把「体积告警 + 打开失败 + 读取期解码/CSV 错误」三类异常收敛到一处。
+
+        参数:
+            max_rows: 非 None 时读满这么多行即**停止读取**（不是读完再切片）。
+                这是护栏的关键语义：``CSV_MAX_ROWS`` 存在的意义就是在文件
+                异常巨大时止损，读满即 break 才能避免"只想取 100 行却付了
+                读完 40 万行的代价"（实测 6 MB / 40 万行需 0.68 s）。
+
+        **为什么返回列表而不是上下文管理器/生成器**：``UnicodeDecodeError``
+        与 ``csv.Error`` 是在**迭代行**时抛出的，而不是 ``open()`` 时。
+        若用 ``@contextmanager`` 写成 "yield 行迭代器，except 里再 yield None"，
+        异常实际上是在调用方的 ``with`` 块内（消费迭代器时）抛出，
+        此时生成器已 yield 过一次，无法二次 yield —— 会触发
+        ``RuntimeError: generator didn't stop after throw()``（已实测复现）。
+        因此在**一个**生成器内部完成读取与异常兜底，把结果一次交付。
+        """
+        handle = self._open_csv(path)
+        if handle is None:
+            return []
+        rows: List[List[str]] = []
         try:
-            with open(path, "r", encoding=CSV_READ_ENCODING, newline="") as handle:
-                artists = parse_artist_rows(csv.reader(handle), spec)
-        except FileNotFoundError:
-            LOGGER.error("[RollingArtist] CSV 文件不存在: %s", path)
-            return []
-        except IsADirectoryError:
-            LOGGER.error("[RollingArtist] CSV 路径是目录: %s", path)
-            return []
+            with handle:
+                for row in csv.reader(handle):
+                    if not row:
+                        continue
+                    rows.append(row)
+                    if max_rows is not None and len(rows) >= max_rows:
+                        break
         except UnicodeDecodeError as error:
             LOGGER.error("[RollingArtist] CSV 编码无法解析（请使用 UTF-8）: %s -> %s", path, error)
             return []
         except (OSError, csv.Error) as error:
             LOGGER.error("[RollingArtist] CSV 读取失败: %s -> %s", path, error)
             return []
+        return rows
+
+    def _read(self, path: str, spec: str) -> List[str]:
+        # 截断由下游 parse_artist_rows 内的 CSV_MAX_ROWS 负责（它按「消费到的行数」计数）
+        artists = parse_artist_rows(self._csv_rows(path), spec)
         if not artists:
             LOGGER.warning("[RollingArtist] CSV 中未解析到任何艺术家: %s", path)
         return artists
 
-    def load_rows(self, custom_path: Optional[str] = None
-                  ) -> Tuple[List[List[str]], Optional[Tuple[str, int, int]]]:
+    def load_rows(
+        self, custom_path: Optional[str] = None
+    ) -> Tuple[List[List[str]], Optional[Tuple[str, int, int]]]:
         """读取并缓存整份 CSV 行，返回 ``(rows, stat_key)``。
 
         与 :meth:`load` 共用同一套「文件签名」缓存策略，供需要多列的节点使用
@@ -239,39 +376,24 @@ class ArtistRepository:
         """
         path = self.resolve_path(custom_path)
         stat_key = self.stat_key(path)
-        if stat_key is not None:
-            with self._lock:
-                cached = self._rows_cache.get(stat_key)
-                if cached is not None:
-                    self._rows_cache.move_to_end(stat_key)
-                    return cached, stat_key
-
-        rows = self._read_rows(path)
-
-        if stat_key is not None and rows:
-            with self._lock:
-                self._rows_cache[stat_key] = rows
-                self._rows_cache.move_to_end(stat_key)
-                while len(self._rows_cache) > self._MAX_CACHE:
-                    self._rows_cache.popitem(last=False)
+        if stat_key is None:
+            return self._read_rows(path), stat_key
+        rows = self._cached_load(self._rows_cache, stat_key, lambda: self._read_rows(path))
         return rows, stat_key
 
     def _read_rows(self, path: str) -> List[List[str]]:
-        try:
-            with open(path, "r", encoding=CSV_READ_ENCODING, newline="") as handle:
-                return [row for row in csv.reader(handle) if row]
-        except FileNotFoundError:
-            LOGGER.error("[RollingArtist] CSV 文件不存在: %s", path)
-            return []
-        except IsADirectoryError:
-            LOGGER.error("[RollingArtist] CSV 路径是目录: %s", path)
-            return []
-        except UnicodeDecodeError as error:
-            LOGGER.error("[RollingArtist] CSV 编码无法解析（请使用 UTF-8）: %s -> %s", path, error)
-            return []
-        except (OSError, csv.Error) as error:
-            LOGGER.error("[RollingArtist] CSV 读取失败: %s -> %s", path, error)
-            return []
+        """读整份 CSV 为行列表；超过 :data:`CSV_MAX_ROWS` 时**读满即停**并告警。"""
+        if CSV_MAX_ROWS is None:
+            return self._csv_rows(path)
+        rows = self._csv_rows(path, max_rows=CSV_MAX_ROWS)
+        if len(rows) >= CSV_MAX_ROWS:
+            LOGGER.warning(
+                "[RollingArtist] CSV 行数达到上限 %d，已截断读取: %s"
+                "（如需读取全部内容，请调大 CSV_MAX_ROWS）",
+                CSV_MAX_ROWS,
+                path,
+            )
+        return rows
 
     def clear_cache(self) -> None:
         """清空加载缓存（测试或手动热重载时使用）。"""
@@ -339,22 +461,55 @@ def split_names(text: Optional[str]) -> List[str]:
     return names
 
 
-def select_artists(rng: random.Random, artist_count: int, artist_top_count: int,
-                   force_list: Sequence[str], artists: Sequence[str],
-                   top_count: int, exclude_set: Set[str]) -> List[str]:
-    """按原有语义选择艺术家。
+def available_names(names: Sequence[str], blocked: Optional[Set[str]]) -> List[str]:
+    """从候选名列表中剔除被屏蔽的名字，返回可用名单。
 
-    - ``force_list`` 中的艺术家一定出现（优先级高于 ``exclude_set``）
-    - ``top_count`` > 0 时保证至少抽取 1 个 Top 艺术家
-    - Top 池不足时回退到其余艺术家补齐（边界处理）
+    这是「候选池计算」的独立一步，供调用方在抽样前明确地知道自己有多少可用项。
+    典型用途：角色节点先用最近窗口算屏蔽集，再用本函数得到可用候选，
+    当结果为空（窗口把候选吃光）时可以显式决定"退回允许重复"。
 
-    返回艺术家名列表（顺序已随机打乱）。
+    参数:
+        names: 完整候选名列表（保持原顺序）
+        blocked: 需要屏蔽的名字集合；``None`` 或空集合表示不屏蔽
+    """
+    if not blocked:
+        return list(names)
+    return [name for name in names if name not in blocked]
+
+
+def select_artists(
+    rng: random.Random,
+    artist_count: int,
+    artist_top_count: int,
+    force_list: Sequence[str],
+    artists: Sequence[str],
+    top_count: int,
+    exclude_set: Set[str],
+) -> List[str]:
+    """从候选池中抽取指定数量的名字。
+
+    - ``force_list`` 中的名字一定出现（优先级高于 ``exclude_set``）
+    - ``top_count`` > 0 时保证至少抽取 1 个 Top 成员
+    - Top 池不足时回退到其余成员补齐（边界处理）
+
+    返回名字列表（顺序已随机打乱）。
 
     实现上使用索引抽样：无排除条件时直接对 ``range`` 抽样，
-    因此运行时间与艺术家总量无关（旧实现对每个元素重复构建 set，复杂度 O(n²)）。
+    因此运行时间与总量无关（旧实现对每个元素重复构建 set，复杂度 O(n²)）。
+
+    注意：本函数只负责"抽"，不负责"判断候选是否够用"。调用方若需要
+    在候选被屏蔽光时采取降级策略，应先用 :func:`available_names` 计算可用候选。
     """
     total = len(artists)
-    force = [name for name in force_list if name]
+    # force 去重（保持首次出现顺序）：重复项会让 len(force) 虚高，
+    # 进而在 `len(force) >= artist_count` 分支里用 rng.sample 抽出同名两次，
+    # 产出 ['a1','a2','a1'] 这种权重被打散、语义重复的提示词且不报错。
+    force: List[str] = []
+    _seen_force: Set[str] = set()
+    for name in force_list:
+        if name and name not in _seen_force:
+            _seen_force.add(name)
+            force.append(name)
     # 强制名单数量不少于需求时，从中随机抽取（保持原有语义）
     if len(force) >= artist_count:
         return list(rng.sample(force, artist_count))
@@ -366,6 +521,7 @@ def select_artists(rng: random.Random, artist_count: int, artist_top_count: int,
     top_idx: Sequence[int]
     rest_idx: Sequence[int]
     if exclude_set or force_set:
+
         def allowed(index: int) -> bool:
             name = artists[index]
             return name not in force_set and name not in exclude_set

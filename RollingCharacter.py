@@ -24,6 +24,7 @@ from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Sequence, Set, Tuple
 
 from .ra_core.artists import (
+    available_names,
     compute_top_count,
     get_repository,
     select_artists,
@@ -119,94 +120,122 @@ class RollingCharacter:
         return {
             "required": {
                 # ---------------- 抽样：抽几个角色、从哪里抽 ----------------
-                "character_count": ("INT", {
-                    "default": 1,
-                    "min": 1,
-                    "max": 10,
-                    "step": 1,
-                    "display": "slider",
-                    "tooltip": "每次生成的角色数量（1-10），每个角色输出一行。"
-                               "角色是单词条，没有穷举模式"
-                }),
-                "character_top_ratio": ("FLOAT", {
-                    "default": 0.01,
-                    "min": 0.01,
-                    "max": 1.0,
-                    "step": 0.01,
-                    "display": "slider",
-                    "tooltip": "人气池占比（0.01-1.0）：按 CSV 行序取前 ceil(候选数×比例) 个"
-                               "（至少 1 个）作为 Top 池，行序越靠前的角色作品数越多。"
-                               "候选数指“作品筛选之后”剩下的角色数"
-                }),
-                "character_top_count": ("INT", {
-                    "default": 1,
-                    "min": 1,
-                    "max": 10,
-                    "step": 1,
-                    "display": "slider",
-                    "tooltip": "每次至少抽取几个人气池角色（1-10）；"
-                               "仅在“Top 优先抽样”开启且人气池非空时生效"
-                }),
-                "seed": ("INT", {
-                    "default": 1234,
-                    "min": 0,
-                    "max": 4294967295,
-                    "tooltip": "随机种子。同一种子在同一组参数下结果可复现；"
-                               "最近 10 条输出记录的回避窗口也会影响实际结果"
-                }),
+                "character_count": (
+                    "INT",
+                    {
+                        "default": 1,
+                        "min": 1,
+                        "max": 10,
+                        "step": 1,
+                        "display": "slider",
+                        "tooltip": "每次生成的角色数量（1-10），每个角色输出一行。角色是单词条，没有穷举模式",
+                    },
+                ),
+                "character_top_ratio": (
+                    "FLOAT",
+                    {
+                        "default": 0.01,
+                        "min": 0.01,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "display": "slider",
+                        "tooltip": "人气池占比（0.01-1.0）：按 CSV 行序取前 ceil(候选数×比例) 个"
+                        "（至少 1 个）作为 Top 池，行序越靠前的角色作品数越多。"
+                        "候选数指“作品筛选之后”剩下的角色数",
+                    },
+                ),
+                "character_top_count": (
+                    "INT",
+                    {
+                        "default": 1,
+                        "min": 1,
+                        "max": 10,
+                        "step": 1,
+                        "display": "slider",
+                        "tooltip": "每次至少抽取几个人气池角色（1-10）；"
+                        "仅在“Top 优先抽样”开启且人气池非空时生效",
+                    },
+                ),
+                "seed": (
+                    "INT",
+                    {
+                        "default": 1234,
+                        "min": 0,
+                        "max": 4294967295,
+                        "tooltip": "随机种子。同一种子在同一组参数下结果可复现；"
+                        "最近 10 条输出记录的回避窗口也会影响实际结果",
+                    },
+                ),
             },
             "optional": {
                 # ---------------- 抽样偏好 ----------------
-                "use_top_priority": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "开启时优先从人气池抽角色，并保证含 character_top_count 个人气角色；"
-                               "关闭时从完整候选列表均匀抽样"
-                }),
+                "use_top_priority": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "开启时优先从人气池抽角色，并保证含 character_top_count 个人气角色；"
+                        "关闭时从完整候选列表均匀抽样",
+                    },
+                ),
                 # ---------------- 名单 ----------------
-                "exclude_characters": ("STRING", {
-                    "default": "",
-                    "tooltip": "要排除的角色名，英文逗号分隔；被排除的名字不会出现在结果中"
-                }),
-                "force_include": ("STRING", {
-                    "default": "",
-                    "tooltip": "必须出现的角色名，英文逗号分隔；优先级高于“排除角色”，"
-                               "数量达到角色数量时直接从中随机抽取。"
-                               "不在 CSV 里的名字也能用，只是没有作品与角色描述信息"
-                }),
+                "exclude_characters": (
+                    "STRING",
+                    {"default": "", "tooltip": "要排除的角色名，英文逗号分隔；被排除的名字不会出现在结果中"},
+                ),
+                "force_include": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": "必须出现的角色名，英文逗号分隔；优先级高于“排除角色”，"
+                        "数量达到角色数量时直接从中随机抽取。"
+                        "不在 CSV 里的名字也能用，只是没有作品与角色描述信息",
+                    },
+                ),
                 # ---------------- 作品 ----------------
-                "copyright_pick": (_copyright_menu(), {
-                    "default": COPYRIGHT_ANY,
-                    "tooltip": "从下拉里挑一个作品。下拉列出 CSV 里的全部作品"
-                               "（按作品热度降序：该作品下所有角色的 count 之和），"
-                               "并且可以直接打字筛选、忽略大小写（输入 a 只留 a 开头的，"
-                               "继续输入 ab 会进一步收窄）。“(不限)”表示不筛选。"
-                               "同时接受 copyright 列的原始写法 fate_(series) 与 trigger 里"
-                               "转义后的写法 fate_\\(series\\)。注意：下拉项来自默认 CSV，"
-                               "换“自定义 CSV 路径”时下拉不会跟着变"
-                }),
+                "copyright_pick": (
+                    _copyright_menu(),
+                    {
+                        "default": COPYRIGHT_ANY,
+                        "tooltip": "从下拉里挑一个作品。下拉列出 CSV 里的全部作品"
+                        "（默认数据约 3460 个，按作品热度降序：该作品下所有角色的 count 之和），"
+                        "并且可以直接打字筛选、忽略大小写（输入 a 只留 a 开头的，"
+                        "继续输入 ab 会进一步收窄）。“(不限)”表示不筛选。"
+                        "同样接受 copyright 列的原始写法 fate_(series) 与 trigger 里"
+                        "转义后的写法 fate_\\(series\\)。注意：下拉项来自默认 CSV，"
+                        "换“自定义 CSV 路径”时下拉不会跟着变",
+                    },
+                ),
                 # ---------------- 输出内容 ----------------
-                "describe_character": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "开启时在每行末尾拼上角色的固定外观标签（core_tags，即角色描述），"
-                               "格式为「角色标签,作品标签,角色描述」；"
-                               "关闭时只输出「角色标签,作品标签」"
-                }),
+                "describe_character": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "开启时在每行末尾拼上角色的固定外观标签（core_tags，即角色描述），"
+                        "格式为「角色标签,作品标签,角色描述」；"
+                        "关闭时只输出「角色标签,作品标签」",
+                    },
+                ),
                 # ---------------- 高级：CSV 与数据库（界面默认折叠） ----------------
-                "custom_csv_path": ("STRING", {
-                    "default": "",
-                    "advanced": True,
-                    "tooltip": "自定义角色 CSV 的路径；"
-                               "留空使用节点目录下的 danbooru_character_001.csv"
-                }),
-                "tested_db_path": ("STRING", {
-                    "default": "",
-                    "advanced": True,
-                    "tooltip": "记录数据库（SQLite）路径；留空使用节点目录下的 "
-                               "rollingcharacter.sqlite（与画师节点分开）。"
-                               "这里只存历史输出记录，更换该路径不会重置“最近 10 条不重复”的窗口"
-                               "（那个窗口在内存里，重启即清零）"
-                }),
-            }
+                "custom_csv_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "advanced": True,
+                        "tooltip": "自定义角色 CSV 的路径；留空使用节点目录下的 danbooru_character_001.csv",
+                    },
+                ),
+                "tested_db_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "advanced": True,
+                        "tooltip": "记录数据库（SQLite）路径；留空使用节点目录下的 "
+                        "rollingcharacter.sqlite（与画师节点分开）。"
+                        "这里只存历史输出记录，更换该路径不会重置“最近 10 条不重复”的窗口"
+                        "（那个窗口在内存里，重启即清零）",
+                    },
+                ),
+            },
         }
 
     RETURN_TYPES = ("STRING", "STRING", "STRING")
@@ -215,8 +244,10 @@ class RollingCharacter:
     CATEGORY = "RollingArtist"
     # 作为输出节点，即使输出未被下游使用也会执行
     OUTPUT_NODE = True
-    DESCRIPTION = ("从角色 CSV 中随机抽取角色，按「角色标签,作品标签,角色描述」逐行输出"
-                   "（多个角色用「逗号+换行」分隔、不带权重），并输出结构化 JSON 与已测数量。")
+    DESCRIPTION = (
+        "从角色 CSV 中随机抽取角色，按「角色标签,作品标签,角色描述」逐行输出"
+        "（多个角色用「逗号+换行」分隔、不带权重），并输出结构化 JSON 与已测数量。"
+    )
     OUTPUT_TOOLTIPS = (
         "角色列表：每个角色一行，格式为「角色标签,作品标签,角色描述」，不带权重；"
         "关闭“开启角色描述”后为「角色标签,作品标签」",
@@ -264,14 +295,20 @@ class RollingCharacter:
     # ------------------------------------------------------------------
     # 主流程
     # ------------------------------------------------------------------
-    def generate_characters(self, character_count: int, character_top_ratio: float,
-                            character_top_count: int, seed: int,
-                            use_top_priority: bool = True,
-                            exclude_characters: str = "", force_include: str = "",
-                            copyright_pick: str = COPYRIGHT_ANY,
-                            describe_character: bool = True,
-                            custom_csv_path: str = "",
-                            tested_db_path: str = "") -> Tuple[str, str, str]:
+    def generate_characters(
+        self,
+        character_count: int,
+        character_top_ratio: float,
+        character_top_count: int,
+        seed: int,
+        use_top_priority: bool = True,
+        exclude_characters: str = "",
+        force_include: str = "",
+        copyright_pick: str = COPYRIGHT_ANY,
+        describe_character: bool = True,
+        custom_csv_path: str = "",
+        tested_db_path: str = "",
+    ) -> Tuple[str, str, str]:
         """生成角色列表。
 
         形参顺序与界面参数顺序一致（ComfyUI 按关键字传参，顺序只影响外部脚本按位置调用）。
@@ -322,18 +359,24 @@ class RollingCharacter:
         with_core = _as_bool(describe_character, True)
 
         # 3) 回避最近 _RECENT_RECORDS 条输出记录里出现过的角色
+        #    分两步走：先算"排除名单后还剩哪些候选"，再决定是否启用回避窗口。
+        #    这样"窗口把候选吃光时退回允许重复"的降级是显式的，而不是事后修正一个
+        #    已经拼好的屏蔽集。
         recent = self.recent_names()
-        blocked = exclude_set | recent
-        rest = [name for name in names if name not in exclude_set]
-        if recent and rest and not [name for name in rest if name not in recent] \
-                and not force_list:
-            # 窗口把候选全部吃掉（可用角色本来就少）：退回允许重复，并明确告警
-            LOGGER.warning(
-                "[RollingCharacter] 最近 %d 条输出记录已覆盖全部 %d 个候选角色，"
-                "本轮不再回避重复（可用角色太少时属于正常现象）",
-                _RECENT_RECORDS, len(rest),
-            )
-            blocked = exclude_set
+        candidates = available_names(names, exclude_set)
+        blocked = exclude_set
+        if recent:
+            survivors = available_names(candidates, recent)
+            if survivors:
+                blocked = exclude_set | recent
+            elif candidates and not force_list:
+                # 候选本来就少、且已被窗口全部覆盖：退回允许重复，并明确告警
+                LOGGER.warning(
+                    "[RollingCharacter] 最近 %d 条输出记录已覆盖全部 %d 个候选角色，"
+                    "本轮不再回避重复（可用角色太少时属于正常现象）",
+                    _RECENT_RECORDS,
+                    len(candidates),
+                )
 
         # 4) 记录库：角色专用 SQLite（记录带 kind 标记，与画师互不干扰）
         db = get_db(tested_db_path, DEFAULT_CHARACTER_DB)
@@ -342,24 +385,28 @@ class RollingCharacter:
         with db.generation_lock():
             rng = random.Random(rng_seed)
             selected = select_artists(
-                rng, count, _as_int(character_top_count, 1), force_list,
-                names, top_priority, blocked,
+                rng,
+                count,
+                _as_int(character_top_count, 1),
+                force_list,
+                names,
+                top_priority,
+                blocked,
             )
             if not selected:
                 raise ValueError(
-                    "[RollingCharacter] 未选出任何角色，请检查 character_count、"
-                    "排除名单与作品选择"
+                    "[RollingCharacter] 未选出任何角色，请检查 character_count、排除名单与作品选择"
                 )
             if len(selected) < count:
                 LOGGER.warning(
                     "[RollingCharacter] 可用角色不足：请求 %d 个，实际选中 %d 个"
                     "（请检查 character_count、作品选择、排除名单或 CSV 规模）",
-                    count, len(selected),
+                    count,
+                    len(selected),
                 )
 
             selected_records = [
-                record_map.get(name) or CharacterRecord(name, "", "", "", 0)
-                for name in selected
+                record_map.get(name) or CharacterRecord(name, "", "", "", 0) for name in selected
             ]
             prompt = build_character_prompt(selected_records, with_core)
 
@@ -367,16 +414,15 @@ class RollingCharacter:
             if not db.record(selected, _key_weights(len(selected)), prompt, KIND_CHARACTER):
                 LOGGER.error(
                     "[RollingCharacter] 记录写入数据库失败(%s)，本次组合未落盘:\n%s",
-                    db.path, prompt,
+                    db.path,
+                    prompt,
                 )
+            # 在事务内取计数：与本次写入处于同一快照，避免事务外再查导致不一致
+            tested_total = db.count(KIND_CHARACTER)
 
         # 记进“最近记录”窗口（放在事务之后：只有真正输出的组合才占用窗口）
         self._remember(selected)
 
-        selected_records = [
-            record_map.get(name) or CharacterRecord(name, "", "", "", 0)
-            for name in selected
-        ]
         # 人气池覆盖全部候选时，所有人都是 Top，无需构建集合
         top_names: Optional[Set[str]] = None
         if top_count < len(names):
@@ -386,7 +432,7 @@ class RollingCharacter:
         return (
             prompt,
             json.dumps(payload, ensure_ascii=False),
-            str(db.count(KIND_CHARACTER)),
+            str(tested_total),
         )
 
 
