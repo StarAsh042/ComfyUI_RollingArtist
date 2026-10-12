@@ -1,0 +1,9 @@
+# 本节点**只依赖 Python 标准库**（csv / json / sqlite3 / threading / os / re …），
+# 不需要安装任何第三方运行时依赖。
+#
+# 保留本文件（内容仅注释）是刻意的：
+#   pyproject.toml 通过 dependencies = {file = ["requirements.txt"]} 读取依赖列表，
+#   文件缺失会导致打包失败；内容为空表示"无第三方依赖"。
+#
+# 测试所需的 pytest 声明在 pyproject.toml 的 [project.optional-dependencies].dev，
+# 用 `pip install -e ".[dev]"` 安装后再运行 pytest。
