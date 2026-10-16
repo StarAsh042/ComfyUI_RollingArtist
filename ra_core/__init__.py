@@ -4,6 +4,7 @@
 - ``constants``:  路径、权重步长、规模阈值、记录类型标记与日志器
 - ``params``:     节点入参的容错转换（两个节点共用）
 - ``artists``:    艺术家 CSV 解析 / 加载缓存 / 索引化抽样
+- ``characters``: 角色数据解析（trigger 拆解）、作品筛选、外观标签合并
 - ``weights``:    权重分配、提示词构建解析、去重键
 - ``db``:         SQLite 记录库（已测记录）
 - ``storage``:    旧版 CSV 读取与备份（供导入与留底使用）
@@ -22,6 +23,21 @@ from .artists import (
     resolve_layout,
     select_artists,
     split_names,
+)
+from .characters import (
+    COPYRIGHT_ANY,
+    CharacterRecord,
+    build_character_prompt,
+    build_payload,
+    build_records,
+    clear_records_cache,
+    copyright_options,
+    filter_by_copyright,
+    load_records,
+    parse_copyright_filter,
+    split_core_tags,
+    split_tags,
+    unique_tags,
 )
 from .constants import (
     DEFAULT_ARTIST_CSV,
@@ -73,6 +89,20 @@ __all__ = [
     "resolve_layout",
     "select_artists",
     "split_names",
+    # characters
+    "COPYRIGHT_ANY",
+    "CharacterRecord",
+    "build_character_prompt",
+    "build_payload",
+    "build_records",
+    "clear_records_cache",
+    "copyright_options",
+    "filter_by_copyright",
+    "load_records",
+    "parse_copyright_filter",
+    "split_core_tags",
+    "split_tags",
+    "unique_tags",
     # constants
     "DEFAULT_ARTIST_CSV",
     "DEFAULT_CHARACTER_CSV",
