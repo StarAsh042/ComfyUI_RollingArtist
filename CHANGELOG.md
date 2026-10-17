@@ -3,6 +3,21 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.0.0] - 2026-10-12
+
+**角色节点版本**：从「画师」扩展到「画师 + 角色」两类数据。
+
+### 新增
+
+- **RollingCharacter 节点**：从角色 CSV 抽人，输出不带权重的提示词，
+  附带作品标签与角色描述
+- **`ra_core/characters.py`**：trigger 拆解、作品筛选、外观标签合并
+- **角色数据集** `danbooru_character_001.csv`
+
+### 变更
+
+- README 补充角色节点、数据源与输出说明
+
 ## [1.0.0] - 2026-10-10
 
 首个版本：内核与画师节点。

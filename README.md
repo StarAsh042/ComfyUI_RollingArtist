@@ -1,31 +1,38 @@
 # ComfyUI RollingArtist
 
-从 danbooru 画师数据里随机抽人并分配随机权重，直接产出可用于文生图的提示词。
+从 danbooru 数据里随机抽人并生成提示词：画师带权重，角色不带权重。
+
+## 节点
+
+| 节点 | 数据源 | 输出 |
+|---|---|---|
+| **RollingArtist** | 画师 CSV | 带权重的 `(artist:名字:权重)` |
+| **RollingCharacter** | 角色 CSV | 不带权重的角色标签 + 作品标签 |
 
 ## 功能
 
-- 随机抽取若干画师，按权重曲线分配权重，输出 `(artist:name:weight)` 形式
-- 支持 Top 池、前缀、随机种子、抽样偏好与名单过滤
-- 已测记录写入 SQLite，同一组合不会重复出现
-- 输出 `prompt` / `artists_json` / `tested_count`
+- 画师：随机抽取、权重曲线（flat / dominant / ramp）、Top 池、前缀、种子、名单过滤
+- 角色：按作品筛选、外观标签合并开关、最近 10 条输出内不重复
+- 两个节点共用 SQLite 记录库，判重与写入在同一事务里完成
 
 ## 安装
 
 把本目录放进 `ComfyUI/custom_nodes/` 下，重启 ComfyUI，
-在节点列表的 `RollingArtist` 分类里即可看到。
+节点列表的 `RollingArtist` 分类下会出现两个节点。
 
 ## 数据
 
-默认读取节点目录下的 `danbooru_art_001.csv`（`name,count,url` 三列），
+- 画师：`danbooru_art_001.csv`（`name,count,url`）
+- 角色：`danbooru_character_001.csv`（`name,count,url`，`trigger` 列拆成「角色,作品」）
+
 也可以在节点参数里指定自己的 CSV。
 
 ## 输出
 
-| 输出 | 类型 | 说明 |
-|---|---|---|
-| `prompt` | STRING | `(artist:名字:权重)` 拼接串 |
-| `artists_json` | STRING | 结构化结果，含名字、权重、是否 Top |
-| `tested_count` | STRING | 已记录的组合数 |
+| 节点 | 输出 |
+|---|---|
+| RollingArtist | `prompt` / `artists_json` / `tested_count` |
+| RollingCharacter | `prompt` / `characters_json` / `tested_count` |
 
 ## 许可证
 
