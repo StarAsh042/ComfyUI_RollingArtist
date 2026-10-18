@@ -3,6 +3,23 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [3.0.0] - 2026-10-14
+
+**界面与文档版本**：让节点在中文界面下同样可用，并把参数说明搬到界面上。
+
+### 新增
+
+- **中英文界面**：`locales/zh` / `locales/en` 下的 `main.json` 与 `nodeDefs.json`，
+  跟随 `Comfy.Locale` 自动切换
+- **参数 tooltip**：参数说明从 README 搬进节点面板
+- **节点帮助文档**：`web/docs/<节点>/<语言>.md`，前端「信息」面板直接展示
+- **`prestartup_script.py`**：启动期清理运行期产物
+
+### 变更
+
+- `__init__.py` 声明 `WEB_DIRECTORY = "./web"`
+- README 补充「界面」一节
+
 ## [2.0.0] - 2026-10-12
 
 **角色节点版本**：从「画师」扩展到「画师 + 角色」两类数据。

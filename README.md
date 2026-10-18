@@ -20,6 +20,12 @@
 把本目录放进 `ComfyUI/custom_nodes/` 下，重启 ComfyUI，
 节点列表的 `RollingArtist` 分类下会出现两个节点。
 
+## 界面
+
+- 参数说明以 tooltip 形式挂在输入上，鼠标悬停即可看到
+- 界面语言跟随 ComfyUI 的 `Comfy.Locale` 自动切换中英文
+- 节点右上角「信息」面板显示本节点的帮助文档（`web/docs/`）
+
 ## 数据
 
 - 画师：`danbooru_art_001.csv`（`name,count,url`）
