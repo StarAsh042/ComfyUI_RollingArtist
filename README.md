@@ -30,8 +30,20 @@
 
 - 画师：`danbooru_art_001.csv`（`name,count,url`）
 - 角色：`danbooru_character_001.csv`（`name,count,url`，`trigger` 列拆成「角色,作品」）
+- 原始导出文件（`danbooru_art_full.csv` / `danbooru_character.csv`）用 Git LFS 存储，
+  克隆后需要执行一次 `git lfs pull`
 
 也可以在节点参数里指定自己的 CSV。
+
+## 加工数据
+
+从 danbooru 原始导出重新生成上面两个数据集：
+
+```bash
+python danbooru_csv_tool.py --help
+python modify_danbooru_art.py --input danbooru_art_full.csv --output danbooru_art_001.csv
+python modify_danbooru_character.py --input danbooru_character.csv --output danbooru_character_001.csv
+```
 
 ## 输出
 

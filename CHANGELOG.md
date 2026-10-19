@@ -3,6 +3,20 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [4.0.0] - 2026-10-16
+
+**数据工具链版本**：数据加工从一次性脚本收敛为可复用工具。
+
+### 新增
+
+- **`danbooru_csv_tool.py`**：CSV 清洗、转义、抽样与导出的公共实现
+- **`modify_danbooru_art.py` / `modify_danbooru_character.py`**：画师与角色两个入口脚本
+- **Git LFS**：`danbooru_art_full.csv` / `danbooru_character.csv` 改为 LFS 指针存储
+
+### 变更
+
+- README 补充「加工数据」一节
+
 ## [3.0.0] - 2026-10-14
 
 **界面与文档版本**：让节点在中文界面下同样可用，并把参数说明搬到界面上。
