@@ -10,6 +10,10 @@ dynamic = ["dependencies"]
 # 运行测试用：pip install -e ".[dev]" 然后 pytest
 dev = ["pytest>=7", "ruff>=0.6", "mypy>=1.10"]
 
+[tool.setuptools]
+# 只打包 ra_core；节点文件由 ComfyUI 以「目录即包」的方式直接加载，不需要进入 wheel
+packages = ["ra_core"]
+
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 
