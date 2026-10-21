@@ -1,0 +1,23 @@
+# 本地提交前检查：安装 `pip install pre-commit && pre-commit install`
+# 手动全量检查：pre-commit run --all-files
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+
+  # 类型检查不在 pre-commit 里跑全套（速度考虑），改由 CI 执行；
+  # 需要本地校验时手动运行：mypy ra_core RollingArtist.py RollingCharacter.py

@@ -1,0 +1,70 @@
+name: CI
+
+# PR 与推送到长期分支时跑测试与静态检查。
+# 额外提供一个聚合 job `ci`：分支保护只引用它一个名字，
+# 以后增删矩阵项都不用改分支保护配置。
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (py${{ matrix.python-version }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.11", "3.12"]
+        os: [ubuntu-latest]
+        include:
+          # 路径防护有 Windows 特有分支（扩展前缀 / ADS / UNC），必须覆盖
+          - os: windows-latest
+            python-version: "3.11"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run tests
+        run: pytest -q
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff check
+        run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
+
+  ci:
+    name: ci
+    if: always()
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate result
+        run: |
+          echo "test=${{ needs.test.result }} lint=${{ needs.lint.result }}"
+          test "${{ needs.test.result }}" = "success"
+          test "${{ needs.lint.result }}" = "success"
