@@ -7,8 +7,6 @@
 
 import sqlite3
 
-import pytest
-
 from ComfyUI_RollingArtist.ra_core.constants import KIND_ARTIST, SCHEMA_VERSION
 from ComfyUI_RollingArtist.ra_core.db import (
     RollingArtistDB,
@@ -127,8 +125,6 @@ def test_read_schema_version_defaults_to_one_without_record(tmp_path):
 
 def test_meta_table_exists_after_open(tmp_path):
     db = RollingArtistDB(str(tmp_path / "meta.sqlite"))
-    exists = db._conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'"
-    ).fetchone()
+    exists = db._conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone()
     assert exists is not None
     db.close()

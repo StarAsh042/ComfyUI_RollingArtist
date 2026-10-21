@@ -32,7 +32,7 @@ def _load(language, filename):
     path = os.path.join(LOCALES_DIR, language, filename)
     if not os.path.isfile(path):
         return None
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, encoding="utf-8") as handle:
         return json.load(handle)
 
 
@@ -89,8 +89,7 @@ def test_node_key_sets_match_across_languages():
         f"节点集合不一致：仅英文有 {en_nodes - zh_nodes}，仅中文有 {zh_nodes - en_nodes}"
     )
     assert en_inputs == zh_inputs, (
-        f"输入参数集合不一致：仅英文有 {en_inputs - zh_inputs}，"
-        f"仅中文有 {zh_inputs - en_inputs}"
+        f"输入参数集合不一致：仅英文有 {en_inputs - zh_inputs}，仅中文有 {zh_inputs - en_inputs}"
     )
 
 
@@ -108,9 +107,7 @@ def test_locales_cover_all_node_inputs():
             code_names = set(_code_inputs(node_cls))
             locale_names = set(node_defs.get(node_name, {}).get("inputs", {}))
             missing = code_names - locale_names
-            assert not missing, (
-                f"{language} 语言包缺少 {node_name} 的输入文案：{sorted(missing)}"
-            )
+            assert not missing, f"{language} 语言包缺少 {node_name} 的输入文案：{sorted(missing)}"
 
 
 @pytest.mark.parametrize("node_name", ["RollingArtist", "RollingCharacter"])
@@ -135,14 +132,9 @@ def test_code_default_tooltips_match_zh_locale(node_name):
         code_tip = str(spec.get("tooltip", "")).strip()
         zh_tip = str(zh_inputs.get(input_name, {}).get("tooltip", "")).strip()
         if code_tip != zh_tip:
-            mismatches.append(
-                f"  {input_name}:\n"
-                f"    代码: {code_tip!r}\n"
-                f"    zh  : {zh_tip!r}"
-            )
+            mismatches.append(f"  {input_name}:\n    代码: {code_tip!r}\n    zh  : {zh_tip!r}")
     assert not mismatches, (
-        f"{node_name} 的代码默认文案与 zh 语言包不一致（共 {len(mismatches)} 处）：\n"
-        + "\n".join(mismatches)
+        f"{node_name} 的代码默认文案与 zh 语言包不一致（共 {len(mismatches)} 处）：\n" + "\n".join(mismatches)
     )
 
 
@@ -162,9 +154,5 @@ def test_every_locale_tooltip_is_non_empty():
         assert node_defs is not None
         for node_name, node in node_defs.items():
             for input_name, spec in node.get("inputs", {}).items():
-                assert spec.get("name", "").strip(), (
-                    f"{language}/{node_name}.{input_name} 的 name 为空"
-                )
-                assert spec.get("tooltip", "").strip(), (
-                    f"{language}/{node_name}.{input_name} 的 tooltip 为空"
-                )
+                assert spec.get("name", "").strip(), f"{language}/{node_name}.{input_name} 的 name 为空"
+                assert spec.get("tooltip", "").strip(), f"{language}/{node_name}.{input_name} 的 tooltip 为空"

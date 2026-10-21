@@ -5,14 +5,12 @@
 """
 
 import os
-import random
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-
 from ComfyUI_RollingArtist.ra_core.constants import KIND_ARTIST, KIND_CHARACTER
 from ComfyUI_RollingArtist.ra_core.db import RollingArtistDB
 
@@ -137,7 +135,7 @@ def test_schema_migration_from_early_3_3_0_database(tmp_path):
 
     db = RollingArtistDB(path)
     assert db.count() == 1
-    assert db.count(KIND_ARTIST) == 1          # 老数据默认归为画师
+    assert db.count(KIND_ARTIST) == 1  # 老数据默认归为画师
     assert db.count(KIND_CHARACTER) == 0
     assert db.is_tested("full_prompt", ["a"], [0.5], KIND_ARTIST) is True
     assert db.is_tested("full_prompt", ["a"], [0.5], KIND_CHARACTER) is False
@@ -164,8 +162,7 @@ def test_legacy_pool_tables_are_dropped(tmp_path):
     RollingArtistDB(path).close()
 
     check = sqlite3.connect(path)
-    names = {row[0] for row in check.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    names = {row[0] for row in check.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     check.close()
     assert "exact_pool" not in names
     assert "pool_meta" not in names
@@ -178,9 +175,7 @@ def test_legacy_csv_import_is_idempotent(tmp_path):
     db = make_db(tmp_path)
     legacy = tmp_path / "old.csv"
     legacy.write_text(
-        "a|b,0.8,0.7,(artist:a:0.8),(artist:b:0.7)\n"
-        "c,0.5,artist:c:0.5\n"
-        "artist:d:0.3\n",
+        "a|b,0.8,0.7,(artist:a:0.8),(artist:b:0.7)\nc,0.5,artist:c:0.5\nartist:d:0.3\n",
         encoding="utf-8",
     )
     assert db.import_legacy_csv(str(legacy)) == (3, 3)
@@ -226,18 +221,24 @@ print(";".join(got))
 def test_cross_process_generates_no_duplicate_combos(tmp_path):
     parent = str(Path(__file__).resolve().parents[2])
     db_path = str(tmp_path / "shared.sqlite")
-    db = RollingArtistDB(db_path)
+    RollingArtistDB(db_path)  # 先建库，子进程再打开同一个文件
 
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     processes = []
     for offset in (0, 1000):
-        script = _CHILD_SCRIPT.format(parent=parent, db_path=db_path,
-                                      artists=ARTISTS, grid=GRID, offset=offset)
-        processes.append(subprocess.Popen(
-            [sys.executable, "-c", script],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", env=env,
-        ))
+        script = _CHILD_SCRIPT.format(
+            parent=parent, db_path=db_path, artists=ARTISTS, grid=GRID, offset=offset
+        )
+        processes.append(
+            subprocess.Popen(
+                [sys.executable, "-c", script],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                env=env,
+            )
+        )
 
     results = []
     for process in processes:
@@ -266,8 +267,14 @@ print(db.import_legacy_csv({str(legacy)!r}))
 """
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     for _ in range(2):
-        done = subprocess.run([sys.executable, "-c", script], capture_output=True,
-                              text=True, encoding="utf-8", env=env, timeout=120)
+        done = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=120,
+        )
         assert done.returncode == 0, done.stderr
     assert RollingArtistDB(db_path).count() == 2
 
@@ -339,7 +346,7 @@ def test_close_then_reuse_silently_reconnects(tmp_path):
     连接是每线程懒创建的，close() 只清掉当前线程的连接引用；
     后续 count() / is_tested() 会按需重建。因此 "close 后再用" 不报错。
     """
-    from ComfyUI_RollingArtist.ra_core.db import get_db, close_all_dbs
+    from ComfyUI_RollingArtist.ra_core.db import close_all_dbs
 
     db = make_db(tmp_path)
     db.record(["a"], [0.5], "p")
@@ -372,7 +379,7 @@ def test_close_current_thread_is_the_canonical_name(tmp_path):
 
 def test_close_all_dbs_clears_process_cache(tmp_path):
     """close_all_dbs() 必须清空进程级缓存，使 get_db 重新构造实例。"""
-    from ComfyUI_RollingArtist.ra_core.db import get_db, close_all_dbs
+    from ComfyUI_RollingArtist.ra_core.db import close_all_dbs, get_db
 
     path = str(tmp_path / "cached.sqlite")
     first = get_db(path)

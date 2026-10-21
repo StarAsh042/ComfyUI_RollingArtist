@@ -3,7 +3,6 @@
 import random
 
 import pytest
-
 from ComfyUI_RollingArtist.ra_core.weights import (
     DEDUP_MODES,
     WEIGHT_CURVES,
@@ -19,11 +18,11 @@ from ComfyUI_RollingArtist.ra_core.weights import (
 BOUND_CASES = [
     (0.2, 1.0, 2.0, 3),
     (0.1, 2.0, 20.0, 5),
-    (0.5, 0.5, 1.5, 4),      # min == max
-    (0.1, 0.3, 0.1, 4),      # 总和小于下界 -> 夹到边界
-    (0.1, 2.0, 0.0, 2),      # 总和为 0 -> 全部取下界
-    (0.9, 0.2, 1.2, 2),      # 上下限写反
-    (-0.5, 1.0, 1.0, 2),     # 负数下界
+    (0.5, 0.5, 1.5, 4),  # min == max
+    (0.1, 0.3, 0.1, 4),  # 总和小于下界 -> 夹到边界
+    (0.1, 2.0, 0.0, 2),  # 总和为 0 -> 全部取下界
+    (0.9, 0.2, 1.2, 2),  # 上下限写反
+    (-0.5, 1.0, 1.0, 2),  # 负数下界
 ]
 
 
@@ -68,18 +67,31 @@ def test_ramp_curve_produces_descending_ladder():
     assert max(ladder) > min(ladder)
 
 
-@pytest.mark.parametrize("value,expected", [
-    ("flat", "flat"), ("DOMINANT", "dominant"), (" ramp ", "ramp"),
-    ("", "flat"), (None, "flat"), ("不存在的值", "flat"),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("flat", "flat"),
+        ("DOMINANT", "dominant"),
+        (" ramp ", "ramp"),
+        ("", "flat"),
+        (None, "flat"),
+        ("不存在的值", "flat"),
+    ],
+)
 def test_normalize_weight_curve(value, expected):
     assert normalize_weight_curve(value) == expected
 
 
-@pytest.mark.parametrize("value,expected", [
-    ("none", "none"), ("FULL_PROMPT", "full_prompt"), ("", "none"),
-    (None, "none"), ("bogus", "none"),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("none", "none"),
+        ("FULL_PROMPT", "full_prompt"),
+        ("", "none"),
+        (None, "none"),
+        ("bogus", "none"),
+    ],
+)
 def test_normalize_dedup_mode(value, expected):
     assert normalize_dedup_mode(value) == expected
     assert expected in DEDUP_MODES
@@ -129,23 +141,25 @@ def test_dedup_key_none_mode_is_empty():
 
 def test_dedup_key_mode_semantics():
     # full_prompt：顺序与权重都参与比较
-    assert dedup_key("full_prompt", ["a", "b"], [0.8, 0.7]) \
-        != dedup_key("full_prompt", ["b", "a"], [0.8, 0.7])
-    assert dedup_key("full_prompt", ["a", "b"], [0.8, 0.7]) \
-        != dedup_key("full_prompt", ["a", "b"], [0.7, 0.8])
+    assert dedup_key("full_prompt", ["a", "b"], [0.8, 0.7]) != dedup_key(
+        "full_prompt", ["b", "a"], [0.8, 0.7]
+    )
+    assert dedup_key("full_prompt", ["a", "b"], [0.8, 0.7]) != dedup_key(
+        "full_prompt", ["a", "b"], [0.7, 0.8]
+    )
 
     # artist_set / artist_list：忽略顺序与权重，只比名字
     for mode in ("artist_set", "artist_list"):
-        assert dedup_key(mode, ["a", "b"], [0.8, 0.7]) \
-            == dedup_key(mode, ["b", "a"], [0.1, 0.2])
-        assert dedup_key(mode, ["a", "b"], [0.8, 0.7]) \
-            != dedup_key(mode, ["a", "c"], [0.8, 0.7])
+        assert dedup_key(mode, ["a", "b"], [0.8, 0.7]) == dedup_key(mode, ["b", "a"], [0.1, 0.2])
+        assert dedup_key(mode, ["a", "b"], [0.8, 0.7]) != dedup_key(mode, ["a", "c"], [0.8, 0.7])
 
     # artist_set 会折叠重复名字，artist_list 不会
-    assert dedup_key("artist_set", ["a", "a", "b"], [1.0, 0.5, 0.5]) \
-        == dedup_key("artist_set", ["a", "b"], [1.0, 0.5])
-    assert dedup_key("artist_list", ["a", "a", "b"], [1.0, 0.5, 0.5]) \
-        != dedup_key("artist_list", ["a", "b"], [1.0, 0.5])
+    assert dedup_key("artist_set", ["a", "a", "b"], [1.0, 0.5, 0.5]) == dedup_key(
+        "artist_set", ["a", "b"], [1.0, 0.5]
+    )
+    assert dedup_key("artist_list", ["a", "a", "b"], [1.0, 0.5, 0.5]) != dedup_key(
+        "artist_list", ["a", "b"], [1.0, 0.5]
+    )
 
 
 def test_dedup_key_escapes_separators():

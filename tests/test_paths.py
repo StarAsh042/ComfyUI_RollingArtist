@@ -8,7 +8,6 @@
 import os
 
 import pytest
-
 from ComfyUI_RollingArtist.ra_core import paths
 from ComfyUI_RollingArtist.ra_core.paths import (
     PathNotAllowedError,
@@ -98,9 +97,7 @@ def test_bypass_ads_on_source_file():
 def test_ads_on_data_file_still_allowed():
     """数据文件带 ADS 后缀时应按主文件放行（不是拒绝，而是识别为主文件）。"""
     probe = os.path.join(paths.NODE_DIR, "danbooru_art_001.csv") + ":evil"
-    assert check_csv_path(probe) == os.path.realpath(
-        os.path.join(paths.NODE_DIR, "danbooru_art_001.csv")
-    )
+    assert check_csv_path(probe) == os.path.realpath(os.path.join(paths.NODE_DIR, "danbooru_art_001.csv"))
 
 
 def test_bypass_other_custom_node_dir():
@@ -124,9 +121,8 @@ def test_bypass_unc_admin_share_to_protected_dir():
     # 不依赖 ComfyUI 的安装位置，换机器 / 换 CI 环境都能复现
     parent = os.path.realpath(os.path.dirname(paths.NODE_DIR))
     drive, tail = os.path.splitdrive(parent)
-    comfy_probe = "\\\\localhost\\%s$\\%s" % (
-        drive[0],
-        os.path.join(tail.lstrip("\\"), "other_node", "secret.csv"),
+    comfy_probe = (
+        "\\\\localhost\\" + drive[0] + "$\\" + os.path.join(tail.lstrip("\\"), "other_node", "secret.csv")
     )
     for probe in (
         r"\\localhost\C$\Windows\win.ini",

@@ -6,7 +6,6 @@ import random
 import time
 
 import pytest
-
 from ComfyUI_RollingArtist.ra_core.artists import (
     ArtistRepository,
     compute_top_count,
@@ -26,15 +25,13 @@ def test_single_column_without_header():
 
 def test_auto_prefers_trigger_over_artist():
     """trigger 是「提示词可直接使用」的列（空格与括号已转义），必须优先于原始 artist 列。"""
-    text = ("artist,trigger,count,url\n"
-            "hammer_(sunset_beach),hammer_\\(sunset_beach\\),5387,http://x\n")
+    text = "artist,trigger,count,url\nhammer_(sunset_beach),hammer_\\(sunset_beach\\),5387,http://x\n"
     assert parse(text) == ["hammer_\\(sunset_beach\\)"]
 
 
 def test_auto_prefers_character_over_trigger():
     """character 必须优先：character CSV 的 trigger 是「角色 + 作品」多标签串，会破坏提示词。"""
-    text = ("character,copyright,trigger,count\n"
-            'hatsune_miku,vocaloid,"hatsune miku, vocaloid",103500\n')
+    text = 'character,copyright,trigger,count\nhatsune_miku,vocaloid,"hatsune miku, vocaloid",103500\n'
     assert parse(text) == ["hatsune_miku"]
 
 
@@ -51,8 +48,7 @@ def test_auto_reads_default_danbooru_art_001_csv():
     assert artists, "默认 CSV 未能解析出艺术家"
     assert DEFAULT_ARTIST_CSV.endswith("danbooru_art_001.csv")
     assert all(" " not in name for name in artists), "trigger 列不应包含空格"
-    assert not any("(" in name.replace("\\(", "") for name in artists), \
-        "trigger 列不应包含未转义括号"
+    assert not any("(" in name.replace("\\(", "") for name in artists), "trigger 列不应包含未转义括号"
 
 
 def test_auto_skips_unknown_header_columns():
@@ -86,16 +82,19 @@ def test_bom_and_surrounding_whitespace_are_stripped():
     assert parse("\ufefffoo\n  bar  \n") == ["foo", "bar"]
 
 
-@pytest.mark.parametrize("total,ratio,expected", [
-    (0, 0.5, 0),
-    (10, 0.01, 1),
-    (10, 1.0, 10),
-    (10, 0.55, 6),
-    (3, 0.0, 1),
-    (5, -1.0, 1),
-    (5, 5.0, 5),
-    (5, "bad", 1),
-])
+@pytest.mark.parametrize(
+    "total,ratio,expected",
+    [
+        (0, 0.5, 0),
+        (10, 0.01, 1),
+        (10, 1.0, 10),
+        (10, 0.55, 6),
+        (3, 0.0, 1),
+        (5, -1.0, 1),
+        (5, 5.0, 5),
+        (5, "bad", 1),
+    ],
+)
 def test_compute_top_count(total, ratio, expected):
     assert compute_top_count(total, ratio) == expected
 
@@ -106,8 +105,7 @@ def test_split_names_dedupes_and_keeps_order():
 
 
 def test_select_artists_force_include_takes_priority():
-    chosen = select_artists(random.Random(0), 2, 1, ["a", "b", "c"],
-                            ["a", "b", "c", "d"], 0, set())
+    chosen = select_artists(random.Random(0), 2, 1, ["a", "b", "c"], ["a", "b", "c", "d"], 0, set())
     assert len(chosen) == 2
     assert set(chosen).issubset({"a", "b", "c"})
 
@@ -322,9 +320,7 @@ def test_csv_max_rows_stops_reading_early(tmp_path, monkeypatch):
     monkeypatch.setattr(artists_mod, "CSV_MAX_ROWS", 50)
     repo = ArtistRepository()
     assert len(repo.load_rows(str(path))[0]) == 50
-    assert consumed["n"] <= 60, (
-        f"截断时读了 {consumed['n']} 行，说明没有提前停止（全量 5000 行）"
-    )
+    assert consumed["n"] <= 60, f"截断时读了 {consumed['n']} 行，说明没有提前停止（全量 5000 行）"
 
 
 def test_invalid_encoding_degrades_gracefully_on_both_paths(tmp_path):

@@ -56,14 +56,13 @@ def test_cpu_work_outside_transaction_runs_in_parallel(tmp_path):
     db = RollingArtistDB(str(tmp_path / "parallel.sqlite"))
     sleep_seconds = 0.15
     thread_count = 4
-    barrier = threading.Barrier(thread_count)   # 让所有线程同时起床，消除启动抖动
-    slept_at = []                                # 各线程「睡眠结束」的时刻
-    locked_at = []                               # 各线程「拿到写锁」的时刻
-    records = []
+    barrier = threading.Barrier(thread_count)  # 让所有线程同时起床，消除启动抖动
+    slept_at = []  # 各线程「睡眠结束」的时刻
+    locked_at = []  # 各线程「拿到写锁」的时刻
 
     def worker(index):
-        barrier.wait()                          # 对齐起点
-        time.sleep(sleep_seconds)               # 事务外的纯 CPU / 准备阶段
+        barrier.wait()  # 对齐起点
+        time.sleep(sleep_seconds)  # 事务外的纯 CPU / 准备阶段
         slept_at.append((index, time.monotonic()))
         with db.generation_lock():
             locked_at.append((index, time.monotonic()))
@@ -87,8 +86,7 @@ def test_cpu_work_outside_transaction_runs_in_parallel(tmp_path):
     spread = max(sleeps) - min(sleeps)
     serial_span = sleep_seconds * (thread_count - 1)
     assert spread < serial_span * 0.5, (
-        f"事务外睡眠似乎被串行化了：睡眠结束时间跨度 {spread:.3f}s，"
-        f"串行预期约 {serial_span:.3f}s"
+        f"事务外睡眠似乎被串行化了：睡眠结束时间跨度 {spread:.3f}s，串行预期约 {serial_span:.3f}s"
     )
 
     # ② 睡眠结束 -> 拿到锁 的等待必须很短：证明锁区间只包住事务本身，
@@ -98,8 +96,7 @@ def test_cpu_work_outside_transaction_runs_in_parallel(tmp_path):
         locked = dict(locked_at)[index]
         wait = locked - woke
         assert wait < sleep_seconds * 2, (
-            f"线程 {index} 在事务外等待过久（{wait:.3f}s），"
-            "说明写锁可能覆盖了 CPU 工作"
+            f"线程 {index} 在事务外等待过久（{wait:.3f}s），说明写锁可能覆盖了 CPU 工作"
         )
 
 

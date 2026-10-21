@@ -38,6 +38,7 @@ def _reset_db_registry():
 @pytest.fixture
 def artists_csv(tmp_path):
     """写一个内容可控的小 CSV，返回其路径。"""
+
     def _make(names, header=None, delimiter="\n"):
         path = tmp_path / "artists.csv"
         lines = ([header] if header else []) + [str(name) for name in names]

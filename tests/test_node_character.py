@@ -13,7 +13,6 @@ import json
 import os
 
 import pytest
-
 from ComfyUI_RollingArtist import NODE_CLASS_MAPPINGS
 from ComfyUI_RollingArtist.RollingCharacter import RollingCharacter
 
@@ -21,8 +20,13 @@ CHARACTER_ROWS = [
     ["character", "copyright", "trigger", "core_tags", "count"],
     ["hatsune_miku", "vocaloid", "hatsune_miku,vocaloid", "1girl, aqua eyes, twintails", "103500"],
     ["hakurei_reimu", "touhou", "hakurei_reimu,touhou", "1girl, brown eyes", "78109"],
-    ["ganyu_(genshin_impact)", "genshin_impact",
-     "ganyu_\\(genshin_impact\\),genshin_impact", "1girl, horns", "50000"],
+    [
+        "ganyu_(genshin_impact)",
+        "genshin_impact",
+        "ganyu_\\(genshin_impact\\),genshin_impact",
+        "1girl, horns",
+        "50000",
+    ],
     ["obscure_char", "touhou", "obscure_char,touhou", "", "5"],
 ]
 
@@ -82,12 +86,19 @@ def test_all_inputs_have_tooltips():
 def test_required_and_optional_parameters():
     inputs = RollingCharacter.INPUT_TYPES()
     assert set(inputs["required"]) == {
-        "character_count", "character_top_ratio", "character_top_count", "seed",
+        "character_count",
+        "character_top_ratio",
+        "character_top_count",
+        "seed",
     }
     assert set(inputs["optional"]) == {
-        "use_top_priority", "exclude_characters", "force_include",
-        "copyright_pick", "describe_character",
-        "custom_csv_path", "tested_db_path",
+        "use_top_priority",
+        "exclude_characters",
+        "force_include",
+        "copyright_pick",
+        "describe_character",
+        "custom_csv_path",
+        "tested_db_path",
     }
 
 
@@ -95,10 +106,21 @@ def test_removed_parameters_are_gone():
     """去重参数、手输作品过滤、旧的开关名与权重参数都不应再出现。"""
     inputs = RollingCharacter.INPUT_TYPES()
     names = set(inputs["required"]) | set(inputs["optional"])
-    for removed in ("dedup_mode", "max_attempts", "copyright_filter",
-                    "include_core_tags", "weight_min", "weight_max", "weight_total",
-                    "weight_curve", "sort_by_weight", "characters_prefix",
-                    "include_copyright_tag", "mode", "csv_column"):
+    for removed in (
+        "dedup_mode",
+        "max_attempts",
+        "copyright_filter",
+        "include_core_tags",
+        "weight_min",
+        "weight_max",
+        "weight_total",
+        "weight_curve",
+        "sort_by_weight",
+        "characters_prefix",
+        "include_copyright_tag",
+        "mode",
+        "csv_column",
+    ):
         assert removed not in names, f"{removed} 已不再生效，不应保留"
 
 
@@ -121,7 +143,9 @@ def test_defaults():
 
 def test_default_db_and_csv_paths():
     from ComfyUI_RollingArtist.ra_core.constants import (
-        DEFAULT_CHARACTER_CSV, DEFAULT_CHARACTER_DB, NODE_DIR,
+        DEFAULT_CHARACTER_CSV,
+        DEFAULT_CHARACTER_DB,
+        NODE_DIR,
     )
     from ComfyUI_RollingArtist.ra_core.db import resolve_db_path
 
@@ -189,32 +213,36 @@ def test_prompt_has_no_weights(node, character_csv, db_path):
 
 def test_prompt_line_format_is_name_copyright_core_tags(node, character_csv, db_path):
     """定死单行格式：角色标签,作品标签,角色描述。"""
-    prompt, _, _ = run(node, character_csv, db_path,
-                       force_include="ganyu_\\(genshin_impact\\)",
-                       character_count=1)
+    prompt, _, _ = run(
+        node, character_csv, db_path, force_include="ganyu_\\(genshin_impact\\)", character_count=1
+    )
     assert prompt == "ganyu_\\(genshin_impact\\),genshin_impact,1girl,horns"
 
 
 def test_prompt_omits_missing_copyright_or_core_tags(node, character_csv, db_path):
-    prompt, _, _ = run(node, character_csv, db_path,
-                       force_include="obscure_char", character_count=1)
+    prompt, _, _ = run(node, character_csv, db_path, force_include="obscure_char", character_count=1)
     # obscure_char 有作品标签但没有角色描述
     assert prompt == "obscure_char,touhou"
 
 
 def test_describe_character_switch(node, character_csv, tmp_path):
     """关掉开关后每行只输出「角色标签,作品标签」。"""
-    with_tags, _, _ = run(node, character_csv, str(tmp_path / "a.sqlite"),
-                          force_include="hatsune_miku", character_count=1)
+    with_tags, _, _ = run(
+        node, character_csv, str(tmp_path / "a.sqlite"), force_include="hatsune_miku", character_count=1
+    )
     without, payload_json, _ = run(
-        RollingCharacter(), character_csv, str(tmp_path / "b.sqlite"),
-        force_include="hatsune_miku", character_count=1, describe_character=False)
+        RollingCharacter(),
+        character_csv,
+        str(tmp_path / "b.sqlite"),
+        force_include="hatsune_miku",
+        character_count=1,
+        describe_character=False,
+    )
 
     assert with_tags == "hatsune_miku,vocaloid,1girl,aqua eyes,twintails"
     assert without == "hatsune_miku,vocaloid"
     # JSON 里的 core_tags 不受开关影响
-    assert json.loads(payload_json)["characters"][0]["core_tags"] == \
-        ["1girl", "aqua eyes", "twintails"]
+    assert json.loads(payload_json)["characters"][0]["core_tags"] == ["1girl", "aqua eyes", "twintails"]
 
 
 def test_json_fields_without_weight(node, character_csv, db_path):
@@ -235,17 +263,13 @@ def test_same_seed_is_reproducible_on_fresh_nodes(character_csv, tmp_path):
 # 作品筛选与名单
 # ----------------------------------------------------------------------
 def test_copyright_pick_limits_candidates(node, character_csv, db_path):
-    _, payload_json, _ = run(node, character_csv, db_path,
-                             copyright_pick="touhou", character_count=1)
-    assert {item["copyright"] for item in json.loads(payload_json)["characters"]} \
-        == {"touhou"}
+    _, payload_json, _ = run(node, character_csv, db_path, copyright_pick="touhou", character_count=1)
+    assert {item["copyright"] for item in json.loads(payload_json)["characters"]} == {"touhou"}
 
 
 def test_copyright_pick_is_case_insensitive(node, character_csv, db_path):
-    _, payload_json, _ = run(node, character_csv, db_path,
-                             copyright_pick="GENSHIN_IMPACT")
-    assert {item["copyright"] for item in json.loads(payload_json)["characters"]} \
-        == {"genshin_impact"}
+    _, payload_json, _ = run(node, character_csv, db_path, copyright_pick="GENSHIN_IMPACT")
+    assert {item["copyright"] for item in json.loads(payload_json)["characters"]} == {"genshin_impact"}
 
 
 def test_copyright_pick_without_match_raises(node, character_csv, db_path):
@@ -261,15 +285,20 @@ def test_copyright_any_means_no_limit(node, character_csv, db_path):
 
 
 def test_copyright_pick_keeps_force_include_working(node, character_csv, db_path):
-    prompt, _, _ = run(node, character_csv, db_path,
-                       copyright_pick="不存在的作品", force_include="hatsune_miku")
+    prompt, _, _ = run(
+        node, character_csv, db_path, copyright_pick="不存在的作品", force_include="hatsune_miku"
+    )
     assert prompt.startswith("hatsune_miku")
 
 
 def test_exclude_and_force_include(node, character_csv, db_path):
-    prompt, payload_json, _ = run(node, character_csv, db_path,
-                                  exclude_characters="hakurei_reimu",
-                                  force_include="ganyu_\\(genshin_impact\\)")
+    prompt, payload_json, _ = run(
+        node,
+        character_csv,
+        db_path,
+        exclude_characters="hakurei_reimu",
+        force_include="ganyu_\\(genshin_impact\\)",
+    )
     names = [item["name"] for item in json.loads(payload_json)["characters"]]
     assert "ganyu_\\(genshin_impact\\)" in names
     assert "hakurei_reimu" not in names
@@ -277,8 +306,7 @@ def test_exclude_and_force_include(node, character_csv, db_path):
 
 
 def test_force_include_with_unknown_name(node, character_csv, db_path):
-    prompt, payload_json, _ = run(node, character_csv, db_path,
-                                  force_include="not_in_csv", character_count=1)
+    prompt, payload_json, _ = run(node, character_csv, db_path, force_include="not_in_csv", character_count=1)
     payload = json.loads(payload_json)
     assert payload["characters"][0]["name"] == "not_in_csv"
     assert payload["characters"][0]["core_tags"] == []
@@ -290,18 +318,17 @@ def test_force_include_with_unknown_name(node, character_csv, db_path):
 # ----------------------------------------------------------------------
 def test_recent_window_avoids_repeats(node, character_csv, db_path):
     """4 个候选连抽 4 次，每次 1 个：窗口内不应出现重复。"""
-    seen = [line_names(run(node, character_csv, db_path, character_count=1,
-                           use_top_priority=False)[0])[0]
-            for _ in range(4)]
+    seen = [
+        line_names(run(node, character_csv, db_path, character_count=1, use_top_priority=False)[0])[0]
+        for _ in range(4)
+    ]
     assert len(set(seen)) == 4, f"最近记录窗口内出现了重复: {seen}"
 
 
 def test_recent_window_spans_whole_generation(node, character_csv, db_path):
     """窗口按「条」记：每次生成 2 个角色，两条记录之间也不该撞。"""
-    first = line_names(run(node, character_csv, db_path, character_count=2,
-                           use_top_priority=False)[0])
-    second = line_names(run(node, character_csv, db_path, character_count=2,
-                            use_top_priority=False)[0])
+    first = line_names(run(node, character_csv, db_path, character_count=2, use_top_priority=False)[0])
+    second = line_names(run(node, character_csv, db_path, character_count=2, use_top_priority=False)[0])
     assert len(set(first)) == 2
     assert len(set(second)) == 2
     assert not (set(first) & set(second)), f"窗口内不应重复: {first} / {second}"
@@ -326,12 +353,10 @@ def test_window_keeps_at_most_ten_records(node, character_csv, db_path):
 
 def test_window_covering_all_candidates_falls_back_to_repeats(node, character_csv, db_path):
     """窗口把候选吃光时退回「允许重复」，而不是报错。"""
-    first = run(node, character_csv, db_path, character_count=4,
-                use_top_priority=False)[0]
-    assert len(first.splitlines()) == 4          # 4 个候选一次被抽走
-    second, _, _ = run(node, character_csv, db_path, character_count=1,
-                       use_top_priority=False)
-    assert line_names(second)[0]                 # 仍有输出，没有抛异常
+    first = run(node, character_csv, db_path, character_count=4, use_top_priority=False)[0]
+    assert len(first.splitlines()) == 4  # 4 个候选一次被抽走
+    second, _, _ = run(node, character_csv, db_path, character_count=1, use_top_priority=False)
+    assert line_names(second)[0]  # 仍有输出，没有抛异常
 
 
 # ----------------------------------------------------------------------
@@ -339,8 +364,10 @@ def test_window_covering_all_candidates_falls_back_to_repeats(node, character_cs
 # ----------------------------------------------------------------------
 def test_tested_count_is_a_cumulative_string(node, character_csv, db_path):
     assert run(RollingCharacter(), character_csv, db_path)[2] == "1"
-    assert run(RollingCharacter(), character_csv, db_path,
-               exclude_characters="hatsune_miku,hakurei_reimu")[2] == "2"
+    assert (
+        run(RollingCharacter(), character_csv, db_path, exclude_characters="hatsune_miku,hakurei_reimu")[2]
+        == "2"
+    )
 
 
 def test_records_without_weights_still_get_distinct_keys(tmp_path):
@@ -377,8 +404,7 @@ def test_records_are_isolated_from_artist_node(node, character_csv, tmp_path):
     assert db.is_tested("full_prompt", names, weights, KIND_ARTIST) is True
     # 角色节点只统计自己的记录：手工 1 条 + 本次生成 1 条
     # （本次生成的角色名与手工记录不同，不会撞键）
-    assert run(node, character_csv, shared, force_include="obscure_char",
-               character_count=1)[2] == "2"
+    assert run(node, character_csv, shared, force_include="obscure_char", character_count=1)[2] == "2"
 
 
 def test_missing_csv_raises(node, tmp_path):
@@ -393,8 +419,8 @@ def test_zero_count_raises(node, character_csv, db_path):
 
 def test_default_character_csv_shape():
     """仓库自带的角色 CSV（若存在）应能直接喂给默认配置。"""
-    from ComfyUI_RollingArtist.ra_core.constants import DEFAULT_CHARACTER_CSV
     from ComfyUI_RollingArtist.ra_core.characters import clear_records_cache, load_records
+    from ComfyUI_RollingArtist.ra_core.constants import DEFAULT_CHARACTER_CSV
 
     if not os.path.isfile(DEFAULT_CHARACTER_CSV):
         pytest.skip("尚未生成 danbooru_character_001.csv")

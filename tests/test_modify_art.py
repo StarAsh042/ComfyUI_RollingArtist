@@ -3,7 +3,6 @@
 import csv
 
 import pytest
-
 from ComfyUI_RollingArtist.modify_danbooru_art import (
     DEFAULT_MIN_COUNT,
     OUTPUT_COLUMNS,
@@ -33,39 +32,48 @@ def test_default_threshold_is_thirty():
     assert OUTPUT_COLUMNS == ("artist", "trigger", "count")
 
 
-@pytest.mark.parametrize("value,expected", [
-    (" Artist ", "artist"), ("\ufeffTRIGGER", "trigger"), ("core-tags", "core_tags"),
-    (None, ""), ("with space", "with_space"),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (" Artist ", "artist"),
+        ("\ufeffTRIGGER", "trigger"),
+        ("core-tags", "core_tags"),
+        (None, ""),
+        ("with space", "with_space"),
+    ],
+)
 def test_normalize_header(value, expected):
     assert normalize_header(value) == expected
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("hammer (sunset beach)", "hammer_\\(sunset_beach\\)"),
-    ("banned artist", "banned_artist"),
-    ("itomugi-kun", "itomugi_kun"),
-    ("  padded name  ", "padded_name"),
-    ("", ""),
-    # 逗号分隔的多标签串：逗号后的空格不能变成下划线
-    ("hakurei reimu, touhou", "hakurei_reimu,touhou"),
-    ("hatsune miku, vocaloid", "hatsune_miku,vocaloid"),
-    ("a , b", "a,b"),
-    ("a,b", "a,b"),
-    # 空段 / 首尾逗号 / 纯空白都收敛掉
-    ("touhou,", "touhou"),
-    (",touhou", "touhou"),
-    ("a,,b", "a,b"),
-    ("   ", ""),
-    (",", ""),
-    # 连续空白 / 短横线折叠为单个下划线
-    ("a  b", "a_b"),
-    ("95---", "95"),
-    ("hi-ho-", "hi_ho"),
-    ("iwashi dorobou -r-", "iwashi_dorobou_r"),
-    ("kezune (i- -i)", "kezune_\\(i_i\\)"),
-    ("-x-", "x"),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("hammer (sunset beach)", "hammer_\\(sunset_beach\\)"),
+        ("banned artist", "banned_artist"),
+        ("itomugi-kun", "itomugi_kun"),
+        ("  padded name  ", "padded_name"),
+        ("", ""),
+        # 逗号分隔的多标签串：逗号后的空格不能变成下划线
+        ("hakurei reimu, touhou", "hakurei_reimu,touhou"),
+        ("hatsune miku, vocaloid", "hatsune_miku,vocaloid"),
+        ("a , b", "a,b"),
+        ("a,b", "a,b"),
+        # 空段 / 首尾逗号 / 纯空白都收敛掉
+        ("touhou,", "touhou"),
+        (",touhou", "touhou"),
+        ("a,,b", "a,b"),
+        ("   ", ""),
+        (",", ""),
+        # 连续空白 / 短横线折叠为单个下划线
+        ("a  b", "a_b"),
+        ("95---", "95"),
+        ("hi-ho-", "hi_ho"),
+        ("iwashi dorobou -r-", "iwashi_dorobou_r"),
+        ("kezune (i- -i)", "kezune_\\(i_i\\)"),
+        ("-x-", "x"),
+    ],
+)
 def test_transform_trigger(raw, expected):
     assert transform_trigger(raw) == expected
 
@@ -73,8 +81,13 @@ def test_transform_trigger(raw, expected):
 def test_transform_trigger_never_leaves_dirty_underscores():
     """产出的标签里不应出现 _touhou / a__b / _x 这类脏写法。"""
     samples = [
-        "hakurei reimu, touhou", "vladilena millize, 86 -eightysix-",
-        "agumon -yuki no kizuna-, digimon", "95---", "a  b", "a , b", "-x-",
+        "hakurei reimu, touhou",
+        "vladilena millize, 86 -eightysix-",
+        "agumon -yuki no kizuna-, digimon",
+        "95---",
+        "a  b",
+        "a , b",
+        "-x-",
     ]
     for raw in samples:
         result = transform_trigger(raw)
@@ -86,10 +99,13 @@ def test_transform_trigger_never_leaves_dirty_underscores():
             assert segment and not segment.startswith("_") and not segment.endswith("_")
 
 
-@pytest.mark.parametrize("raw", [
-    "already_\\(escaped\\)",      # 已转义（奇数个反斜杠）：不再重复加
-    "double_\\\\(escaped\\\\)",   # 偶数个反斜杠：视为未转义，补一个后稳定
-])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "already_\\(escaped\\)",  # 已转义（奇数个反斜杠）：不再重复加
+        "double_\\\\(escaped\\\\)",  # 偶数个反斜杠：视为未转义，补一个后稳定
+    ],
+)
 def test_transform_trigger_is_idempotent_after_one_pass(raw):
     once = transform_trigger(raw)
     assert transform_trigger(once) == once
@@ -106,8 +122,8 @@ def test_convert_keeps_only_three_columns_and_filters_by_count():
     assert stats == {"total": 6, "kept": 5, "skipped": 0}
 
     names = [row[0] for row in output[1:]]
-    assert "low_count_artist" not in names          # count 29 被过滤
-    assert "exactly_thirty" in names                # 边界值保留
+    assert "low_count_artist" not in names  # count 29 被过滤
+    assert "exactly_thirty" in names  # 边界值保留
     assert all(len(row) == 3 for row in output)
 
 
@@ -164,7 +180,7 @@ def test_backup_naming_and_no_overwrite(tmp_path):
     backup = backup_output(str(target))
     assert backup == str(tmp_path / "danbooru_art_001.bak")
     assert (tmp_path / "danbooru_art_001.bak").read_text(encoding="utf-8") == "old-content\n"
-    assert target.read_text(encoding="utf-8") == "old-content\n"   # 原文件仍在
+    assert target.read_text(encoding="utf-8") == "old-content\n"  # 原文件仍在
 
     # 已有备份时不覆盖：先改内容再备份，备份内容应保持第一次那份
     target.write_text("newer-content\n", encoding="utf-8")
@@ -192,7 +208,7 @@ def test_main_end_to_end(tmp_path, capsys):
     output.write_text("placeholder\n", encoding="utf-8")
 
     assert main(["-i", str(source), "-o", str(output), "-n", "30"]) == 0
-    assert (tmp_path / "art.bak").exists()          # 覆盖前自动备份
+    assert (tmp_path / "art.bak").exists()  # 覆盖前自动备份
     with open(output, encoding="utf-8", newline="") as handle:
         body = list(csv.reader(handle))
     assert body[0] == ["artist", "trigger", "count"]

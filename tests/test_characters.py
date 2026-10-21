@@ -3,7 +3,6 @@
 import csv
 
 import pytest
-
 from ComfyUI_RollingArtist.ra_core.artists import ArtistRepository
 from ComfyUI_RollingArtist.ra_core.characters import (
     CharacterRecord,
@@ -25,8 +24,13 @@ ROWS = [
     HEADER,
     ["hatsune_miku", "vocaloid", "hatsune_miku,vocaloid", "1girl, aqua eyes", "103500"],
     ["hakurei_reimu", "touhou", "hakurei_reimu,touhou", "1girl, brown eyes", "78109"],
-    ["ganyu_(genshin_impact)", "genshin_impact",
-     "ganyu_\\(genshin_impact\\),genshin_impact", "1girl, horns, horns", "50000"],
+    [
+        "ganyu_(genshin_impact)",
+        "genshin_impact",
+        "ganyu_\\(genshin_impact\\),genshin_impact",
+        "1girl, horns, horns",
+        "50000",
+    ],
     ["obscure_char", "touhou", "obscure_char,touhou", "", "5"],
 ]
 
@@ -46,14 +50,17 @@ def records_of_csv(path, column="trigger"):
 # ----------------------------------------------------------------------
 # 基础解析
 # ----------------------------------------------------------------------
-@pytest.mark.parametrize("raw,expected", [
-    ("a,b", ["a", "b"]),
-    (" a , b ", ["a", "b"]),
-    ("a,,b,", ["a", "b"]),
-    ("", []),
-    (None, []),
-    ("1girl, aqua eyes, twintails", ["1girl", "aqua eyes", "twintails"]),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("a,b", ["a", "b"]),
+        (" a , b ", ["a", "b"]),
+        ("a,,b,", ["a", "b"]),
+        ("", []),
+        (None, []),
+        ("1girl, aqua eyes, twintails", ["1girl", "aqua eyes", "twintails"]),
+    ],
+)
 def test_split_tags(raw, expected):
     assert split_tags(raw) == expected
     assert split_core_tags(raw) == expected
@@ -66,13 +73,22 @@ def test_unique_tags_keeps_first_occurrence():
 def test_build_records_splits_trigger_into_name_and_copyright_tag():
     records = records_of()
     assert [record.name for record in records] == [
-        "hatsune_miku", "hakurei_reimu", "ganyu_\\(genshin_impact\\)", "obscure_char",
+        "hatsune_miku",
+        "hakurei_reimu",
+        "ganyu_\\(genshin_impact\\)",
+        "obscure_char",
     ]
     assert [record.extra_tags for record in records] == [
-        "vocaloid", "touhou", "genshin_impact", "touhou",
+        "vocaloid",
+        "touhou",
+        "genshin_impact",
+        "touhou",
     ]
     assert [record.copyright for record in records] == [
-        "vocaloid", "touhou", "genshin_impact", "touhou",
+        "vocaloid",
+        "touhou",
+        "genshin_impact",
+        "touhou",
     ]
     assert [record.post_count for record in records] == [103500, 78109, 50000, 5]
     assert records[0].core_tags == "1girl, aqua eyes"
@@ -132,13 +148,16 @@ def test_build_records_tolerates_bad_count():
 # ----------------------------------------------------------------------
 # 作品筛选
 # ----------------------------------------------------------------------
-@pytest.mark.parametrize("raw,expected", [
-    ("touhou", ["touhou"]),
-    (" touhou , vocaloid ", ["touhou", "vocaloid"]),
-    ("touhou,TOUHOU", ["touhou"]),
-    ("", []),
-    (None, []),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("touhou", ["touhou"]),
+        (" touhou , vocaloid ", ["touhou", "vocaloid"]),
+        ("touhou,TOUHOU", ["touhou"]),
+        ("", []),
+        (None, []),
+    ],
+)
 def test_parse_copyright_filter(raw, expected):
     assert parse_copyright_filter(raw) == expected
 
@@ -158,14 +177,19 @@ def test_filter_by_copyright_accepts_raw_and_escaped_forms():
     """作品名里带括号时，两种写法都要能匹配上。"""
     rows = [
         HEADER,
-        ["merlin_(fate/prototype)", "fate_(series)",
-         "merlin_\\(fate/prototype\\),fate_\\(series\\)", "1girl, pointy ears", "1102"],
+        [
+            "merlin_(fate/prototype)",
+            "fate_(series)",
+            "merlin_\\(fate/prototype\\),fate_\\(series\\)",
+            "1girl, pointy ears",
+            "1102",
+        ],
     ]
     records = records_of(rows)
     assert [records[i].name for i in filter_by_copyright(records, "genshin_impact")] == []
-    assert filter_by_copyright(records, "fate_(series)") == [0]      # copyright 列的原始写法
-    assert filter_by_copyright(records, r"fate_\(series\)") == [0]   # trigger 里转义后的写法
-    assert filter_by_copyright(records, "FATE_(SERIES)") == [0]      # 忽略大小写
+    assert filter_by_copyright(records, "fate_(series)") == [0]  # copyright 列的原始写法
+    assert filter_by_copyright(records, r"fate_\(series\)") == [0]  # trigger 里转义后的写法
+    assert filter_by_copyright(records, "FATE_(SERIES)") == [0]  # 忽略大小写
 
 
 def test_filter_by_copyright_without_match():
@@ -177,34 +201,37 @@ def test_filter_by_copyright_without_match():
 # ----------------------------------------------------------------------
 def test_copyright_options_keeps_every_work_and_breaks_ties_by_name():
     """下拉列出全部作品；热度相同时按名字升序，长尾作品也在里面。"""
-    rows = [HEADER] + [
-        [f"c{index}", "pokemon", f"c{index},pokemon", "", "1"] for index in range(5)
-    ] + [
-        [f"t{index}", "touhou", f"c{index},touhou", "", "1"] for index in range(3)
-    ] + [
-        ["solo", "rare_work", "solo,rare_work", "", "1"],
-    ]
+    rows = (
+        [HEADER]
+        + [[f"c{index}", "pokemon", f"c{index},pokemon", "", "1"] for index in range(5)]
+        + [[f"t{index}", "touhou", f"c{index},touhou", "", "1"] for index in range(3)]
+        + [
+            ["solo", "rare_work", "solo,rare_work", "", "1"],
+        ]
+    )
     assert copyright_options(records_of(rows)) == ["pokemon", "touhou", "rare_work"]
 
 
 def test_copyright_options_sorts_by_total_count_not_character_amount():
     """排序依据是 count 总和，不是「作品里有多少个角色」。"""
-    rows = [HEADER] + [
-        # 2 个角色但每个都很热 -> 总和 2000
-        [f"hot{index}", "few_but_hot", f"hot{index},few_but_hot", "", "1000"]
-        for index in range(2)
-    ] + [
-        # 5 个角色但都很冷 -> 总和 5
-        [f"cold{index}", "many_but_cold", f"cold{index},many_but_cold", "", "1"]
-        for index in range(5)
-    ]
+    rows = (
+        [HEADER]
+        + [
+            # 2 个角色但每个都很热 -> 总和 2000
+            [f"hot{index}", "few_but_hot", f"hot{index},few_but_hot", "", "1000"]
+            for index in range(2)
+        ]
+        + [
+            # 5 个角色但都很冷 -> 总和 5
+            [f"cold{index}", "many_but_cold", f"cold{index},many_but_cold", "", "1"]
+            for index in range(5)
+        ]
+    )
     assert copyright_options(records_of(rows)) == ["few_but_hot", "many_but_cold"]
 
 
 def test_copyright_options_ignores_blank_and_deduplicates():
-    rows = [HEADER] + [
-        [f"c{index}", "touhou", f"c{index},touhou", "", "1"] for index in range(3)
-    ]
+    rows = [HEADER] + [[f"c{index}", "touhou", f"c{index},touhou", "", "1"] for index in range(3)]
     assert copyright_options(records_of(rows)) == ["touhou"]
 
 
@@ -239,8 +266,7 @@ def test_build_character_prompt_one_line_per_character():
         CharacterRecord("b", "work2", "work2", "1girl, horns", 1),
     ]
     # 行尾补逗号：拼成一行时前后两个角色的标签不会粘在一起
-    assert build_character_prompt(records) == \
-        "a,work1,1girl,twintails,\nb,work2,1girl,horns"
+    assert build_character_prompt(records) == "a,work1,1girl,twintails,\nb,work2,1girl,horns"
 
 
 def test_build_character_prompt_has_no_trailing_comma_for_single_character():
@@ -249,12 +275,15 @@ def test_build_character_prompt_has_no_trailing_comma_for_single_character():
     assert not prompt.endswith(",")
 
 
-@pytest.mark.parametrize("record,expected", [
-    (CharacterRecord("a", "", "", "", 1), "a"),
-    (CharacterRecord("a", "touhou", "touhou", "", 1), "a,touhou"),
-    (CharacterRecord("a", "", "", "1girl", 1), "a,1girl"),
-    (CharacterRecord("a", "touhou", "touhou", "1girl", 1), "a,touhou,1girl"),
-])
+@pytest.mark.parametrize(
+    "record,expected",
+    [
+        (CharacterRecord("a", "", "", "", 1), "a"),
+        (CharacterRecord("a", "touhou", "touhou", "", 1), "a,touhou"),
+        (CharacterRecord("a", "", "", "1girl", 1), "a,1girl"),
+        (CharacterRecord("a", "touhou", "touhou", "1girl", 1), "a,touhou,1girl"),
+    ],
+)
 def test_build_character_prompt_omits_missing_parts(record, expected):
     assert build_character_prompt([record]) == expected
 
@@ -275,8 +304,7 @@ def test_build_character_prompt_can_drop_core_tags():
         CharacterRecord("b", "w2", "w2", "", 1),
     ]
     assert build_character_prompt(records, include_core_tags=False) == "a,w,\nb,w2"
-    assert build_character_prompt(records, include_core_tags=True) == \
-        "a,w,1girl,horns,\nb,w2"
+    assert build_character_prompt(records, include_core_tags=True) == "a,w,1girl,horns,\nb,w2"
 
 
 def test_build_character_prompt_falls_back_to_copyright_column():

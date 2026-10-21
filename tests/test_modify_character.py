@@ -8,16 +8,32 @@ import csv
 import os
 
 import pytest
-
 from ComfyUI_RollingArtist import modify_danbooru_art as art_script
 from ComfyUI_RollingArtist import modify_danbooru_character as character_script
-from ComfyUI_RollingArtist.danbooru_csv_tool import BACKUP_SUFFIX, convert as generic_convert
+from ComfyUI_RollingArtist.danbooru_csv_tool import BACKUP_SUFFIX
+from ComfyUI_RollingArtist.danbooru_csv_tool import convert as generic_convert
 
 HEADER = ["character", "copyright", "trigger", "core_tags", "count", "solo_count", "url"]
 ROWS = [
     HEADER,
-    ["hatsune_miku", "vocaloid", "hatsune miku, vocaloid", "1girl, aqua eyes, twintails", "103500", "75493", "http://x"],
-    ["admiral_(kancolle)", "kantai_collection", "admiral (kancolle), kantai collection", "1girl, ponytail", "4000", "3000", "http://x"],
+    [
+        "hatsune_miku",
+        "vocaloid",
+        "hatsune miku, vocaloid",
+        "1girl, aqua eyes, twintails",
+        "103500",
+        "75493",
+        "http://x",
+    ],
+    [
+        "admiral_(kancolle)",
+        "kantai_collection",
+        "admiral (kancolle), kantai collection",
+        "1girl, ponytail",
+        "4000",
+        "3000",
+        "http://x",
+    ],
     ["low_count", "some_copyright", "low count", "1girl", "29", "10", "http://x"],
     ["exactly_thirty", "", "exactly thirty", "", "30", "10", "http://x"],
     ["", "no_character", "no character", "1girl", "99", "10", "http://x"],
@@ -35,8 +51,7 @@ def build(path, rows=ROWS):
 # 接口约定
 # ----------------------------------------------------------------------
 def test_output_columns_and_escape_columns():
-    assert character_script.OUTPUT_COLUMNS == (
-        "character", "copyright", "trigger", "core_tags", "count")
+    assert character_script.OUTPUT_COLUMNS == ("character", "copyright", "trigger", "core_tags", "count")
     assert character_script.ESCAPE_COLUMNS == ("trigger",)
     assert character_script.DEFAULT_MIN_COUNT == 30
     assert character_script.DEFAULT_INPUT.endswith("danbooru_character.csv")
@@ -69,8 +84,8 @@ def test_convert_filters_by_count_and_sorts_descending():
     names = [row[0] for row in output[1:]]
     counts = [int(row[4]) for row in output[1:]]
 
-    assert "low_count" not in names            # count 29 被过滤
-    assert "exactly_thirty" in names           # 边界值保留
+    assert "low_count" not in names  # count 29 被过滤
+    assert "exactly_thirty" in names  # 边界值保留
     assert counts == sorted(counts, reverse=True)
 
 
@@ -93,9 +108,9 @@ def test_convert_escapes_only_trigger():
 def test_convert_keeps_empty_copyright_but_skips_empty_character_or_trigger():
     output, stats = character_script.convert(ROWS, 0)
     names = [row[0] for row in output[1:]]
-    assert "exactly_thirty" in names           # copyright 为空不影响保留
-    assert "empty_trigger" not in names        # trigger 为空 -> 跳过
-    assert "" not in names                     # character 为空 -> 跳过
+    assert "exactly_thirty" in names  # copyright 为空不影响保留
+    assert "empty_trigger" not in names  # trigger 为空 -> 跳过
+    assert "" not in names  # character 为空 -> 跳过
     assert stats["skipped"] == 2
 
 
@@ -107,8 +122,9 @@ def test_convert_skips_short_and_bad_rows():
         ["bad_count", "c", "bad count trigger", "tags", "abc", "1", "http://x"],
         [],
     ]
-    output, stats = generic_convert(rows, 30, character_script.OUTPUT_COLUMNS,
-                                    character_script.ESCAPE_COLUMNS)
+    output, stats = generic_convert(
+        rows, 30, character_script.OUTPUT_COLUMNS, character_script.ESCAPE_COLUMNS
+    )
     assert [row[0] for row in output[1:]] == ["ok"]
     assert stats == {"total": 3, "kept": 1, "skipped": 2}
 
@@ -190,11 +206,10 @@ def test_processed_character_csv_shape():
     assert all(len(row) == 5 for row in body)
     assert min(int(row[4]) for row in body) >= 30
     assert not any(" " in row[2] for row in body), "trigger 列不应包含空格"
-    assert not any("(" in row[2].replace("\\(", "") for row in body), \
-        "trigger 列不应包含未转义括号"
+    assert not any("(" in row[2].replace("\\(", "") for row in body), "trigger 列不应包含未转义括号"
     # 脏下划线守卫：,_ / _, / __ / 首尾下划线
-    assert not any(",_" in row[2] or "_," in row[2] for row in body), \
-        "trigger 列不应出现逗号紧邻的下划线"
+    assert not any(",_" in row[2] or "_," in row[2] for row in body), "trigger 列不应出现逗号紧邻的下划线"
     assert not any("__" in row[2] for row in body), "trigger 列不应出现连续下划线"
-    assert not any(row[2].startswith("_") or row[2].endswith("_") for row in body), \
+    assert not any(row[2].startswith("_") or row[2].endswith("_") for row in body), (
         "trigger 列不应以短横线/空格转来的下划线开头或结尾"
+    )
