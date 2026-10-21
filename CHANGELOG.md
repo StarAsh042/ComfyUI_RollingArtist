@@ -3,6 +3,29 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [5.0.0] - 2026-10-19
+
+**工程化基线版本**：把项目从「能跑」推进到「可持续交付」。
+
+### 新增
+
+- **CI 工作流（`.github/workflows/ci.yml`）**：测试矩阵覆盖 py3.8 / 3.11 / 3.12 与 Windows py3.11，
+  另有独立 lint job，并提供稳定的聚合检查 `ci` 供分支保护引用
+- **`.pre-commit-config.yaml`**：提交前自动跑 ruff check / ruff format
+- **测试纳入版本库**：316 项测试从本地未跟踪状态改为随仓库分发，CI 才真正跑得起来
+
+### 修复
+
+- **`pip install -e .` 失败**：setuptools 在 flat-layout 下发现 `web` / `ra_core` / `locales`
+  多个顶层包而拒绝构建；补 `[tool.setuptools] packages = ["ra_core"]` 显式声明
+- **`test_paths.py` 绑死本机路径**：UNC 绕过用例硬编码安装路径，换机器必挂；
+  改为从 `NODE_DIR` 推导
+
+### 变更
+
+- `.gitignore` 不再忽略 `tests` 目录
+- README 重写，补齐安装、界面、数据加工与输出说明
+
 ## [4.0.0] - 2026-10-16
 
 **数据工具链版本**：数据加工从一次性脚本收敛为可复用工具。
