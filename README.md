@@ -130,6 +130,30 @@ python modify_danbooru_art.py -n 100     # 换成 count >= 100
 - **角色文件的 `character` 列没有转义**（只处理 trigger），带括号的仍有 16,380 条（如 `ganyu_(genshin_impact)`）；这些括号进提示词会被权重解析器当分组语法吃掉，需精确匹配请自行加工该列
 - `trigger` 段内连字符会变成下划线（`itomugi-kun` → `itomugi_kun`），想保留原始连字符改 `danbooru_csv_tool.transform_text` 一处
 
+## 参与开发
+
+> **给外部贡献者的重要说明**
+>
+> `main` 分支受保护，且仅维护者可直接推送。
+> **请向 `dev` 分支提交 Pull Request；直接向 `main` 提交的 PR 大概率不会受理。**
+
+推荐流程：
+
+1. Fork 本仓库到你自己账号
+2. 从 `dev` 分支切出特性分支（`git checkout -b feature/xxx`）
+3. 提交改动并推送到你的 Fork
+4. 向本仓库的 **`dev` 分支**开 Pull Request，等待 CI 通过与合并
+
+分支流向：`feature/xxx` → `dev`（日常集成）→ `main`（发布版本）
+
+本地开发与自检：
+
+```bash
+pip install -e ".[dev]"
+ruff check . && ruff format --check .
+pytest -q
+```
+
 ## 测试
 
 ```bash
