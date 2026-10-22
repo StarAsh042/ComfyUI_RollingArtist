@@ -255,6 +255,16 @@ class RollingCharacter:
         "当前数据库里已记录的角色组合数量（字符串形式，可直接接到文本节点查看）",
     )
 
+    @classmethod
+    def IS_CHANGED(cls, custom_csv_path: str = "", **kwargs: Any) -> str:
+        """把角色 CSV 的文件签名纳入缓存键：文件被替换时强制重算。
+
+        与 RollingArtist 同源（共用 :func:`ra_core.storage.file_fingerprint`）：
+        参数不变而 CSV 内容变了时，默认缓存会一直返回旧角色列表。
+        文件与参数都不变时指纹稳定，缓存行为不变。
+        """
+        return get_repository(DEFAULT_CHARACTER_CSV).cache_fingerprint(custom_csv_path)
+
     def __init__(self) -> None:
         """初始化节点实例：准备角色仓库、状态容器与“最近记录”窗口。
 

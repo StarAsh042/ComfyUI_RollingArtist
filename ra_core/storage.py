@@ -18,6 +18,7 @@ from .weights import parse_prompt, parse_weight_list
 
 __all__ = [
     "ensure_parent_dir",
+    "file_fingerprint",
     "read_rows",
     "parse_tested_row",
     "backup_file",
@@ -32,6 +33,23 @@ def ensure_parent_dir(path: str) -> None:
     directory = os.path.dirname(os.path.abspath(path))
     if directory and not os.path.isdir(directory):
         os.makedirs(directory, exist_ok=True)
+
+
+def file_fingerprint(path: str) -> str:
+    """文件指纹：``规范化路径|mtime_ns|size``；文件不存在时返回 ``missing:<路径>``。
+
+    供节点的 ``IS_CHANGED`` 使用：ComfyUI 只按输入参数判断缓存是否命中，
+    节点读的是外部 CSV，参数不变而文件被替换时会命中旧结果。把文件签名
+    纳入指纹后，CSV 内容一变就重算。
+
+    只读 ``os.stat``，不打开文件，因此可以放在每次执行前的缓存判断里。
+    """
+    normalized = os.path.normcase(os.path.abspath(path))
+    try:
+        info = os.stat(normalized)
+    except OSError:
+        return f"missing:{normalized}"
+    return f"{normalized}|{info.st_mtime_ns}|{info.st_size}"
 
 
 def read_rows(path: str) -> List[List[str]]:

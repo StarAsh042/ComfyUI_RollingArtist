@@ -63,7 +63,7 @@ from .paths import (
     is_path_guard_disabled,
 )
 from .startup import cleanup_default_runtime_files, default_runtime_files
-from .storage import backup_file, parse_tested_row, read_rows
+from .storage import backup_file, file_fingerprint, parse_tested_row, read_rows
 from .weights import (
     DEDUP_MODES,
     WEIGHT_CURVES,
@@ -135,6 +135,7 @@ __all__ = [
     "forbidden_roots",
     "is_path_guard_disabled",
     "backup_file",
+    "file_fingerprint",
     "parse_tested_row",
     "read_rows",
     # weights
