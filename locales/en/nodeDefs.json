@@ -93,7 +93,7 @@
     "inputs": {
       "character_count": {
         "name": "Character Count",
-        "tooltip": "Number of characters generated per run (1-10), one output line each. Characters are single tags, so there is no exhaustion mode."
+        "tooltip": "Number of characters generated per run (1-10), one output line each. Characters are single tags, so there is no exhaustion mode. The dedup window covers the last 10 runs and lives in node-instance memory (cleared on restart; each instance keeps its own)."
       },
       "character_top_ratio": {
         "name": "Top Pool Ratio",
@@ -133,7 +133,7 @@
       },
       "tested_db_path": {
         "name": "Records DB Path",
-        "tooltip": "Path of the SQLite records database; leave empty for rollingcharacter.sqlite in the node directory (separate from the artist node). It only stores the output history, so changing the path does not reset the \"no repeat within the last 10 outputs\" window (that window lives in memory and is cleared on restart)."
+        "tooltip": "Path of the SQLite records database; leave empty for rollingcharacter.sqlite in the node directory (separate from the artist node). The database at the default path is cleared on every startup — set an explicit path to keep it across sessions. It only stores the output history, so changing the path does not reset the \"no repeat within the last 10 outputs\" window (that window lives in memory, is cleared on restart, and each node instance keeps its own)."
       }
     },
     "outputs": {

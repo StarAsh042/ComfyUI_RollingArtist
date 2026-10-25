@@ -71,7 +71,7 @@ ganyu_\(genshin_impact\),genshin_impact,1girl,horns
 
 角色节点**不做权重分配**（故无 `weight_*` / `sort_by_weight`）；输出**不接受前缀包装**（没有画师那样的 `artists_prefix` 开关）；**没有去重模式参数**，改用固定规则的窗口。
 
-**重复回避**：窗口存最近 10 条输出记录（每条 = 一次生成，可含多个角色），抽取前把窗口内角色名从候选排除，因此 `character_count=3` 相当于「最近 30 个角色内不重复」。窗口在**节点实例内存**里（重启清零）；外部脚本可用 `node.reset_recent()` 清空、`node.recent_names()` 查看。窗口吃掉全部候选时退回「允许重复」并打 WARNING。
+**重复回避**：窗口存最近 10 条输出记录（每条 = 一次生成，可含多个角色），抽取前把窗口内角色名从候选排除，因此 `character_count=3` 相当于「最近 30 个角色内不重复」。窗口在**节点实例内存**里（重启清零、多实例各自独立——同一张图放两个角色节点，各避各的）；外部脚本可用 `node.reset_recent()` 清空、`node.recent_names()` 查看。窗口吃掉全部候选时退回「允许重复」并打 WARNING。
 
 输出三个：`prompt`、`characters_json`（`[{"name","copyright","top","count","core_tags"}]`）、`tested_count`。
 
