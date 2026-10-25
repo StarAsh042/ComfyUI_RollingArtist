@@ -427,4 +427,4 @@ feature/xxx ──> dev（日常集成）──> main（发布版本）
 | 合并 | PR #7（dev→main）squash 合并 → main `9029838`；tag `v5.1.2` 已推送 |
 | 发布 | publish.yml 运行成功（24s，run 40188118532）；Registry 5.1.2 = Pending（11:16:02Z，扫描中） |
 | 分支同步 | origin/dev 经合并提交 `a3e5d39` 与 main 内容一致（未使用强推） |
-| Registry 现状 | 5.1.2 / 5.1.1 双 Pending 并存（用户决策不等 5.1.1 定级即发布）；5.1.0 / 5.0.0 仍 Flagged，暂无 Active 版本；申诉稿仍待用户确认后提交 |
+| Registry 现状 | **5.1.2 / 5.1.1 / 5.1.0 / 5.0.0 四版本全部 Flagged，无 Active 版本**（5.1.1 10:35Z、5.1.2 11:16Z 起扫，21:00Z 前均已定级 Flagged）；`.comfyignore` 收敛验证通过：5.1.0/5.0.0 各 13/12 条 findings（11 条在 tests/）→ 5.1.1/5.1.2 各 3 条且全在 `ra_core/db.py`（sqlite3.connect 被 database_connections + network_operations 双报）与 `ra_core/paths.py`（os.environ 逃生开关），severity 全 info；申诉稿已按四版本实况更新于 `.workbuddy-ai/memory/registry-appeal-draft-2026-10-25.md`，渠道为 Comfy-Org/registry-backend 提 issue，**待用户确认后提交（已从可选变为必需：无 Active 版本新用户无法安装）** |
