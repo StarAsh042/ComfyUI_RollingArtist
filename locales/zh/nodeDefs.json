@@ -121,7 +121,7 @@
       },
       "copyright_pick": {
         "name": "作品",
-        "tooltip": "从下拉里挑一个作品。下拉列出 CSV 里的全部作品（默认数据约 3460 个，按作品热度降序：该作品下所有角色的 count 之和），并且可以直接打字筛选、忽略大小写（输入 a 只留 a 开头的，继续输入 ab 会进一步收窄）。“(不限)”表示不筛选。同样接受 copyright 列的原始写法 fate_(series) 与 trigger 里转义后的写法 fate_\\(series\\)。注意：下拉项来自默认 CSV，换“自定义 CSV 路径”时下拉不会跟着变"
+        "tooltip": "从下拉里挑一个作品。下拉列出 CSV 里的全部作品（默认数据约 3460 个，按作品热度降序：该作品下所有角色的 count 之和），并且可以直接打字筛选、忽略大小写（输入 a 只留 a 开头的，继续输入 ab 会进一步收窄）。“(不限)”表示不筛选。同样接受 copyright 列的原始写法 fate_(series) 与 trigger 里转义后的写法 fate_\\(series\\)。注意：下拉项来自默认 CSV，换“自定义 CSV 路径”时下拉不会跟着变——但筛选会在该 CSV 上生效，其作品名不会出现在下拉里，请直接填写"
       },
       "describe_character": {
         "name": "开启角色描述",
@@ -129,7 +129,7 @@
       },
       "custom_csv_path": {
         "name": "自定义 CSV 路径",
-        "tooltip": "自定义角色 CSV 的路径；留空使用节点目录下的 danbooru_character_001.csv"
+        "tooltip": "自定义角色 CSV 的路径；留空使用节点目录下的 danbooru_character_001.csv。作品筛选（“作品”参数）在该 CSV 上生效，但其作品名不会出现在作品下拉里，请直接填写该 CSV 中的作品名"
       },
       "tested_db_path": {
         "name": "记录数据库路径",

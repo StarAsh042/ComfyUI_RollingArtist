@@ -65,9 +65,9 @@ ganyu_\(genshin_impact\),genshin_impact,1girl,horns
 | `seed` | INT | 随机种子 |
 | `use_top_priority` | BOOLEAN | 优先从人气池抽 |
 | `exclude_characters` / `force_include` | STRING | 名单；强制包含允许写不在 CSV 里的名字 |
-| `copyright_pick` | COMBO | 列出全部作品（默认约 3,460 个，按 count 总和降序、并列按名字升序），首项 `(不限)`；可打字筛选、忽略大小写 |
+| `copyright_pick` | COMBO | 列出全部作品（默认约 3,460 个，按 count 总和降序、并列按名字升序），首项 `(不限)`；可打字筛选、忽略大小写。**下拉项来自默认 CSV**：填了 `custom_csv_path` 时下拉不会跟着变，但筛选在该 CSV 上生效——其作品名请直接填写（原始写法 `fate_(series)` 亦可）；选了个该 CSV 里没有的作品时，报错会列出该 CSV 的作品总数与热门示例 |
 | `describe_character` | BOOLEAN | 每行末尾拼上角色描述；默认开启 |
-| `custom_csv_path` / `tested_db_path` | STRING | 留空用 `danbooru_character_001.csv` / `rollingcharacter.sqlite`（与画师分开） |
+| `custom_csv_path` / `tested_db_path` | STRING | 留空用 `danbooru_character_001.csv` / `rollingcharacter.sqlite`（与画师分开）；作品筛选在 `custom_csv_path` 指向的 CSV 上生效 |
 
 角色节点**不做权重分配**（故无 `weight_*` / `sort_by_weight`）；输出**不接受前缀包装**（没有画师那样的 `artists_prefix` 开关）；**没有去重模式参数**，改用固定规则的窗口。
 

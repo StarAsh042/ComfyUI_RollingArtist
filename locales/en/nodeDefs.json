@@ -121,7 +121,7 @@
       },
       "copyright_pick": {
         "name": "Work",
-        "tooltip": "Pick one work from the dropdown. The list holds every work in the CSV (about 3460 with the default data, sorted by popularity: the `count` column summed over the work's characters, descending) and is searchable as you type, case-insensitively (typing \"a\" keeps works starting with a, typing \"ab\" narrows it further). \"(不限)\" means no filtering. Both the raw copyright form fate_(series) and the escaped trigger form fate_\\(series\\) are accepted. Note: the list comes from the default CSV and does not follow a custom CSV path."
+        "tooltip": "Pick a copyright from the dropdown. The dropdown lists every copyright in the CSV (about 3460 in the default data, ordered by overall popularity: the sum of all character counts), and you can type to filter it, case-insensitively (typing a keeps only entries starting with a, typing ab narrows it further). \"(Any)\" means no filter. Raw copyright spellings like fate_(series) and their escaped form in the trigger column fate_\\(series\\) are both accepted. Note: the dropdown comes from the default CSV and does not follow \"Custom CSV path\" - but filtering IS applied to that CSV, so copyrights of a custom CSV never appear in the dropdown; type them directly."
       },
       "describe_character": {
         "name": "Enable Character Description",
@@ -129,7 +129,7 @@
       },
       "custom_csv_path": {
         "name": "Custom CSV Path",
-        "tooltip": "Path to a custom character CSV; leave empty for danbooru_character_001.csv in the node directory."
+        "tooltip": "Path to a custom character CSV; leave empty to use danbooru_character_001.csv in the node directory. Copyright filtering (the \"copyright\" parameter) is applied to this CSV, but its copyright names do not appear in the copyright dropdown - type them directly."
       },
       "tested_db_path": {
         "name": "Records DB Path",

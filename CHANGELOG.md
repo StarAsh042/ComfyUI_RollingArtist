@@ -3,6 +3,12 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 改进
+
+- **T-16：`custom_csv_path` 与作品筛选的执行期一致性保障**：ComfyUI 的 `INPUT_TYPES` 拿不到节点实例参数（`execution.py`/`graph.py` 均为无参调用），作品下拉无法按实例联动——本版补齐架构允许的部分：① 作品筛选结果为空时的报错分级，填了自定义 CSV 时明确「作品选择=X 不在自定义 CSV 的作品列表中」并列出该 CSV 的作品总数与热门示例（未填时指明不在默认 CSV 的列表中），取代原先指不明方向的「筛选后没有可用角色」；② `CharacterIndex` 新增 `copyrights` 惰性缓存属性（与下拉菜单同一排序），供报错取示例；③ 两处 tooltip 与 README 补齐联动方向（下拉不跟着变、但筛选在该 CSV 上生效、作品名请直接填写）
+
 ## [5.1.3] - 2026-10-25
 
 **扫描误报消除版本**：为标准库等价 API 替换，无功能变化、无行为变化（内容即原「未发布」段，按发布纪律定版）。
