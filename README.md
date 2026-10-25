@@ -166,6 +166,8 @@ pytest
 
 测试**不需要 ComfyUI**：`ra_core/` 是纯逻辑，节点文件只 import 标准库与 `ra_core`，可直接实例化。覆盖纯逻辑、两个节点的接口与行为（含**回避窗口**）、加工脚本与跨进程去重。
 
+规模口径（2026-10-25 实测）：**254 个测试函数**，参数化展开共 **338 个用例**。CHANGELOG 中 5.0.0 记载的「316 项」为当时的展开用例口径；差额来自 5.1.0 新增的 `tests/test_node_cache.py`（13 项）与 `tests/test_character_index.py`（9 项）。
+
 ## 变更记录
 
 见 [CHANGELOG.md](CHANGELOG.md)。

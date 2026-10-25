@@ -3,6 +3,22 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- **`BENCHMARKS.md`**：性能基线文档（测量方法、环境、复测数据），并索引行为级防回归测试
+- **`docs/decisions/OPEN-DECISIONS.md`**：角色回避窗口持久化（OD-01）与默认记录库保留策略（OD-02）两项待决决策登记，各含量状/选项/影响面/倾向/解锁条件
+
+### 工程
+
+- **CI 增加 mypy job**（第一期非阻断，`continue-on-error`）：命令同本地门禁 `python -m mypy ra_core RollingArtist.py RollingCharacter.py`
+- **`.comfyignore`**：发布包排除 `tests/`、`.github/` 等开发配置与 LFS 原料文件，缩小发布物体积与 Registry 安全扫描面（运行期资源 `ra_core/`、`locales/`、`web/docs/`、`danbooru_*_001.csv` 一律保留）
+
+### 文档
+
+- README 测试段补充规模口径：254 个测试函数 / 参数化展开 338 个用例（2026-10-25 实测），并说明与 5.0.0「316 项」的口径关系
+
 ## [5.1.0] - 2026-10-25
 
 **修复与收敛版本**：合入三个已完成的功能分支（缓存修复 / 角色性能 / 持锁范围文档），不新增节点功能、不改节点契约。

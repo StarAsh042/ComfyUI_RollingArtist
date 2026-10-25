@@ -393,3 +393,14 @@ feature/xxx ──> dev（日常集成）──> main（发布版本）
 - 测试口径实测：338 个收集用例 = 316（5.0.0 时点口径）+ 22（两个新测试文件）——CHANGELOG「316 项测试」在 5.0.0 时点准确；T-12 需把口径更新为当前值并区分「测试函数数（254）/ 参数化展开用例数（338）」
 - Registry 观察：5.0.0 版本状态为 Flagged（10-22 发布时即存在，早于本轮迭代，非本次引入）；5.1.0 为 Pending（Registry 审核/索引异步，latest_version 指针尚未翻转）
 - Sprint 2（T-07~T-12）待启；Q-01/Q-02（角色去重与记录保留策略）待维护者决策，决策前不动 T-08
+
+### Sprint 2 执行回填（2026-10-25 晚）
+
+| 任务 | 状态 | 证据 |
+|------|------|------|
+| T-07 OPEN-DECISIONS | 完成（文档侧） | `docs/decisions/OPEN-DECISIONS.md`：OD-01（角色窗口持久化）/ OD-02（默认库保留策略）落条，均含现状/选项/影响面/倾向/解锁条件；RESOLVED 待维护者拍板（Q-01/Q-02） |
+| T-09 CI mypy | 完成（非阻断期） | ci.yml 增加 mypy job（`continue-on-error: true`，未纳入聚合 `ci` 门禁）；本地连续全绿 2 周后可转阻断 |
+| T-11 性能基线 | 完成 | `BENCHMARKS.md`：方法/环境/复测数据（角色节点温跑 16.0~23.9ms，p50 18.1ms，验证 5.1.0 优化方向）+ 行为级防回归测试索引（`test_index_is_cached_between_calls` 同一性断言，perf 分支自带，未重复造） |
+| T-12 测试口径 | 完成 | README 补「254 个测试函数 / 338 个展开用例」口径；查实 CHANGELOG 5.0.0 的「316 项」在当时即准确（338 − 22 新增），历史段不改写，口径说明入 README 与 [未发布] 段 |
+| Registry 健康 | 进行中 | node.zip 实物核验：含 tests/ 14 文件 + .github/ + 4 CSV（8.15MB，无 .comfyignore）；5.0.0 被标记原因已取回（12 条 info 级：sqlite3.connect 误报为网络 ×8、paths.py 读环境变量 ×1、tests 内 subprocess ×3）；`.comfyignore` 已备（排除 tests/ 等，运行期资源不动）；5.1.0 仍 Pending（扫描中），若转 Flagged 则发 5.1.1 + 持 info 级证据申诉 |
+| T-10 运行时冒烟 | 9/10 通过，1 项阻塞 | 记录见 `.workbuddy-ai/memory/t10-runtime-smoke-2026-10-25.md`：注册/schema/下拉/前端节点库/i18n(zh)/双节点执行全过；IS_CHANGED 运行时项需重启 ComfyUI（用户正在使用该实例，待授权） |
