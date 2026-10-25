@@ -402,5 +402,16 @@ feature/xxx ──> dev（日常集成）──> main（发布版本）
 | T-09 CI mypy | 完成（非阻断期） | ci.yml 增加 mypy job（`continue-on-error: true`，未纳入聚合 `ci` 门禁）；本地连续全绿 2 周后可转阻断 |
 | T-11 性能基线 | 完成 | `BENCHMARKS.md`：方法/环境/复测数据（角色节点温跑 16.0~23.9ms，p50 18.1ms，验证 5.1.0 优化方向）+ 行为级防回归测试索引（`test_index_is_cached_between_calls` 同一性断言，perf 分支自带，未重复造） |
 | T-12 测试口径 | 完成 | README 补「254 个测试函数 / 338 个展开用例」口径；查实 CHANGELOG 5.0.0 的「316 项」在当时即准确（338 − 22 新增），历史段不改写，口径说明入 README 与 [未发布] 段 |
-| Registry 健康 | 进行中 | node.zip 实物核验：含 tests/ 14 文件 + .github/ + 4 CSV（8.15MB，无 .comfyignore）；5.0.0 被标记原因已取回（12 条 info 级：sqlite3.connect 误报为网络 ×8、paths.py 读环境变量 ×1、tests 内 subprocess ×3）；`.comfyignore` 已备（排除 tests/ 等，运行期资源不动）；5.1.0 仍 Pending（扫描中），若转 Flagged 则发 5.1.1 + 持 info 级证据申诉 |
-| T-10 运行时冒烟 | 9/10 通过，1 项阻塞 | 记录见 `.workbuddy-ai/memory/t10-runtime-smoke-2026-10-25.md`：注册/schema/下拉/前端节点库/i18n(zh)/双节点执行全过；IS_CHANGED 运行时项需重启 ComfyUI（用户正在使用该实例，待授权） |
+| Registry 健康 | 完成（5.1.1 已发，申诉待确认） | 5.1.1 已带 `.comfyignore` 发布（run 40185393167 成功，18:35 上线，Registry 状态 Pending 扫描中）；5.0.0/5.1.0 仍 Flagged（13 条 info 级 findings，11 条在 tests/——5.1.1 起 tests/ 不再进发布包；2 条核心代码为 sqlite3.connect/os.environ 误报，运行时代码零网络导入有硬证据）；申诉稿已备于 `.workbuddy-ai/memory/registry-appeal-draft-2026-10-25.md`，渠道为 Comfy-Org/registry-backend 提 issue，**待用户确认后提交** |
+| T-10 运行时冒烟 | 10/10 完成 | 记录见 `.workbuddy-ai/memory/t10-runtime-smoke-2026-10-25.md`：用户授权重启（新进程 PID 4540）后 IS_CHANGED 验证 PASS——seed 4242 首跑 EXECUTED → 同参数 CACHED → touch CSV 后 EXECUTED；附带修正冒烟脚本判定逻辑（execution_cached 每次执行都播报，须看 payload 的 nodes 列表） |
+
+### 5.1.1 发布与 T-10 收尾（2026-10-25 深夜）
+
+| 项 | 结果 |
+|----|------|
+| 版本变更 | pyproject 5.1.0 → 5.1.1；CHANGELOG「未发布」段定版为 5.1.1（工程与发布面收敛，无运行时行为变化） |
+| 门禁 | pytest / ruff check / ruff format --check / mypy 本地全绿；CRLF 纯净 |
+| 合并 | PR #6（dev→main）squash 合并 → main `449f147`；tag `v5.1.1` 已推送 |
+| 发布 | publish.yml 运行成功（24s）；Registry 5.1.1 = Pending（10:35:38Z，扫描中，预计数小时转 Active） |
+| 分支同步 | origin/dev 经合并提交 `e3375c3` 与 main 内容一致（未使用强推） |
+| 冒烟踩坑 | ComfyUI 0.42.5 的 outputs 缓存为纯内存（重启即冷启动，无磁盘持久化）；execution_cached 消息每次执行均播报，判定必须看 payload nodes 列表 |
