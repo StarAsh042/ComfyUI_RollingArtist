@@ -114,8 +114,8 @@
 | T-14 | 路径防护增强评估（白名单目录配置/TOCTOU 缓解） | P2 可延后 | L | TD-07 |
 | T-15 | 新语言 i18n（按需，如 ja） | P2 可延后 | M | — |
 | T-16 | 作品下拉联动 `custom_csv_path` | P2 **已完成（重定义）** | M | TD-08 | 已合并 main `f2a83f3`（PR #9）并随 5.1.4 发布（main `2d43572`，tag v5.1.4，21:56Z）：查明 ComfyUI `INPUT_TYPES` 为无参调用（execution.py:885/900、graph.py:91/130、server.py:846），per-instance 下拉联动架构上不可行；按「执行期一致性保障」落地：报错分级（自定义 CSV 场景指明不在该 CSV 并给总量+热门示例）、`CharacterIndex.copyrights` 惰性缓存、tooltip/README 边界说明、4 个新测试 |
-| T-17 | 仓库清理：删除 backup 分支；`import_legacy_csv` 标注生命周期 | P2 可延后 | S | TD-13 |
-| T-18 | 数据更新 SOP 文档化（重跑加工脚本的流程与校验） | P2 可延后 | S | — |
+| T-17 | 仓库清理：删除 backup 分支；`import_legacy_csv` 标注生命周期 | P2 **已完成** | S | TD-13 | PR #11 合入 main `a7a6d2d`：本地分支 `backup/pre-rebuild-20261022-233943` 已删（删除前 `git diff` 树对比核验内容已被 5.0.0 完整包含、零损失、从未推 origin）；`import_legacy_csv` docstring 补生命周期标注（4.x→5.0.0 一次性迁移工具、无生产调用方）。TD-13 关闭 |
+| T-18 | 数据更新 SOP 文档化（重跑加工脚本的流程与校验） | P2 **已完成** | S | — | PR #11 合入 main `a7a6d2d`：新增 `docs/DATA-UPDATE-SOP.md`（数据文件全景表 / S1-S6 流程含 LFS 纪律与阈值留痕 / pytest+实物四项抽查 / .bak 与 git 双轨回滚 / 提交约定），README 数据预处理段挂链接 |
 
 ---
 
@@ -430,3 +430,5 @@ feature/xxx ──> dev（日常集成）──> main（发布版本）
 | Registry 现状 | **5.1.2 / 5.1.1 / 5.1.0 / 5.0.0 四版本全部 Flagged，无 Active 版本**（5.1.1 10:35Z、5.1.2 11:16Z 起扫，21:00Z 前均已定级 Flagged）；`.comfyignore` 收敛验证通过：5.1.0/5.0.0 各 13/12 条 findings（11 条在 tests/）→ 5.1.1/5.1.2 各 3 条且全在 `ra_core/db.py`（sqlite3.connect 被 database_connections + network_operations 双报）与 `ra_core/paths.py`（os.environ 逃生开关），severity 全 info |
 | 误报消除（5.1.3） | 维护者决策改代码不走申诉：5.1.3（main `1135b70`，tag v5.1.3，13:25Z 发布，publish.yml 35s 成功）将两处触发点替换为标准库等价官方形式——`sqlite3.connect()` → `sqlite3.Connection()`（官方连接类，参数一致）、`os.environ.get()` → `os.getenv()`（官方等价函数），338 用例全过、行为零变化；残留风险点（注释/docstring 文字、4 处系统变量 os.environ.get）与分支预案见 `.workbuddy-ai/memory/registry-scan-fix-2026-10-25.md`；**5.1.3 截至 21:45 仍 Pending（已 8+ 小时，既往版本约 2 小时定级——疑似 sqlite3.Connection 构造触发更审重的扫描通道，继续观察）** |
 | T-16 完成 | PR #9 合入 main `f2a83f3`（未动版本号故未触发发布）；21:56 定版 5.1.4：main `2d43572`、tag v5.1.4、publish.yml 成功（run 40199945615），Registry 5.1.4 = Pending（13:57:41Z 起扫）——按维护者决策「先发 5.1.4 不等 5.1.3 定级」，T-16 内容随 5.1.4 上线；当前 Registry：5.1.4/5.1.3 双 Pending、5.1.0/5.0.0 Flagged |
+| T-17/T-18 完成 | PR #11 合入 main `a7a6d2d`（不动版本号，未触发发布）：backup 分支删除（核验零损失）+ `import_legacy_csv` 生命周期标注 + `docs/DATA-UPDATE-SOP.md` + README 挂链接 |
+| Registry 异动 | 22:20 复查：**5.1.1 / 5.1.2 / 5.1.3 已从 versions 列表消失**（5.1.0 时隐时现，API 同参数多次查询返回 2~3 条不一致——后端最终一致性 + 渐进移除）；5.1.4 仍 Pending 且 `comfy_node_extract_status=pending`；节点本体 `NodeStatusActive`、`latest_version` 仍指向 5.0.0（Flagged）、下载量停更 31。疑为 Registry 侧对多版本并存/被标记版本的清理行为，持续观察；若 5.1.4 长时间（>4h）不定级，按 `.workbuddy-ai/memory/registry-scan-fix-2026-10-25.md` 预案推进 |
