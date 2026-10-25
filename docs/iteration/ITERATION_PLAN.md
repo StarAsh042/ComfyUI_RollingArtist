@@ -371,3 +371,25 @@ feature/xxx ──> dev（日常集成）──> main（发布版本）
 | 日期 | 变更内容 | 原因 | 影响范围 |
 |------|----------|------|----------|
 | 2026-10-25 | 首版：只读分析 + v5.1.0 迭代计划 | 用户要求制定后续迭代计划 | 全文 |
+
+---
+
+## 执行记录（2026-10-25，v5.1.0 发布后追加）
+
+> 本节为发布后的执行回填；上方计划原文未改动。Sprint 1（T-01~T-06）已全部完成。
+
+| 任务 | 状态 | 证据 |
+|------|------|------|
+| T-01 合并 `fix/is-changed` | 完成 | `ef94f75`（--no-ff，自动合并无冲突）；`tests/test_node_cache.py` 13 项 |
+| T-02 合并 `perf/character-derived` | 完成 | `c23cf26`（--no-ff，自动合并无冲突）；`tests/test_character_index.py` 9 项 |
+| T-03 合并 `docs/lock-scope` | 完成 | `f1c1fb8`（仅注释/docstring，AC-03 满足） |
+| T-04 文档同步与一致性校验 | 完成 | `29f969a`；CHANGELOG 5.1.0 段 + README 缓存/性能说明；参数覆盖 28/28、已删参数零残留、CRLF 纯净 |
+| T-05 全量门禁 + QA 独立验收 | 完成 | pytest 338 例 / ruff check / ruff format --check / mypy（12 文件）全绿；QA RoleVerdict: **pass**（12 条 AC 全过；测试零删除零弱化；两处定向变异均被测试击杀） |
+| T-06 发布 5.1.0 | 完成 | PR #4 squash 合并 → main `dcb98bc`；publish.yml 运行成功（Registry 版本历史已列 5.1.0，CDN 产物在库）；tag `v5.1.0` → `dcb98bc` |
+
+执行备注（供后续迭代参考）：
+
+- 本机代理对 github.com 的 HTTP/2 通道不稳定，git 远程操作需 `-c http.version=HTTP/1.1`（已固化到仓库本地配置，不影响仓库内容）
+- 测试口径实测：338 个收集用例 = 316（5.0.0 时点口径）+ 22（两个新测试文件）——CHANGELOG「316 项测试」在 5.0.0 时点准确；T-12 需把口径更新为当前值并区分「测试函数数（254）/ 参数化展开用例数（338）」
+- Registry 观察：5.0.0 版本状态为 Flagged（10-22 发布时即存在，早于本轮迭代，非本次引入）；5.1.0 为 Pending（Registry 审核/索引异步，latest_version 指针尚未翻转）
+- Sprint 2（T-07~T-12）待启；Q-01/Q-02（角色去重与记录保留策略）待维护者决策，决策前不动 T-08
