@@ -16,6 +16,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tupl
 
 from .constants import CSV_READ_ENCODING, DEFAULT_ARTIST_CSV, LOGGER
 from .paths import check_csv_path
+from .storage import file_fingerprint
 
 __all__ = [
     "ArtistRepository",
@@ -225,6 +226,22 @@ class ArtistRepository:
         if not path:
             return self.default_path
         return check_csv_path(path)
+
+    def cache_fingerprint(self, custom_path: Optional[str]) -> str:
+        """CSV 缓存指纹，供节点的 ``IS_CHANGED`` 使用。
+
+        与 :meth:`load` 走同一条路径解析（空路径 -> 默认 CSV，用户路径 -> 路径防护），
+        因此指纹与真正被读取的文件严格对应。
+
+        路径被防护拒绝或无法解析时**不抛异常**：``IS_CHANGED`` 抛异常会打断
+        ComfyUI 的缓存判断；这里返回一个稳定哨兵，让节点照常执行并在执行时
+        抛出原本的错误（用户能看到明确原因）。
+        """
+        try:
+            resolved = self.resolve_path(custom_path)
+        except (OSError, ValueError) as error:
+            return f"invalid:{type(error).__name__}:{str(custom_path or '').strip()}"
+        return file_fingerprint(resolved)
 
     def stat_key(self, path: str) -> Optional[Tuple[str, int, int]]:
         """返回 (规范化绝对路径, 修改时间, 大小)；文件不可用时返回 None。"""
