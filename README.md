@@ -133,7 +133,7 @@ python modify_danbooru_art.py -n 100     # 换成 count >= 100
 - **角色文件的 `character` 列没有转义**（只处理 trigger），带括号的仍有 16,380 条（如 `ganyu_(genshin_impact)`）；这些括号进提示词会被权重解析器当分组语法吃掉，需精确匹配请自行加工该列
 - `trigger` 段内连字符会变成下划线（`itomugi-kun` → `itomugi_kun`），想保留原始连字符改 `danbooru_csv_tool.transform_text` 一处
 
-> 更新 / 更换数据的完整流程（取数、LFS 纪律、校验清单、回滚、提交约定）见 [`docs/DATA-UPDATE-SOP.md`](docs/DATA-UPDATE-SOP.md)。
+> 更新 / 更换数据的完整流程（取数、LFS 纪律、校验清单、回滚、提交约定）见仓库数据 SOP；该 SOP 与项目文档仅维护在本地工作树，不随远端仓库分发。
 
 ## 参与开发
 
@@ -151,7 +151,7 @@ python modify_danbooru_art.py -n 100     # 换成 count >= 100
 
 分支流向：`feature/xxx` → `dev`（日常集成）→ `main`（发布版本）
 
-本地开发与自检：
+本地开发与自检（维护者本地工作树执行——`tests/` 与项目文档仅保留在本地，不进远端仓库）：
 
 ```bash
 pip install -e ".[dev]"
@@ -159,16 +159,13 @@ ruff check . && ruff format --check .
 pytest -q
 ```
 
+外部贡献者只需 ruff 两项静态检查（克隆仓库不含测试套件）。
+
 ## 测试
 
-```bash
-pip install -e ".[dev]"
-pytest
-```
+测试套件覆盖纯逻辑、两个节点的接口与行为（含**回避窗口**）、加工脚本与跨进程去重，**不需要 ComfyUI** 即可运行。规模口径（2026-10-25 实测）：**254 个测试函数**，参数化展开共 **338 个用例**；CHANGELOG 中 5.0.0 记载的「316 项」为当时的展开用例口径，差额来自 5.1.0 新增的节点缓存与角色索引两组测试（13 + 9 项）。
 
-测试**不需要 ComfyUI**：`ra_core/` 是纯逻辑，节点文件只 import 标准库与 `ra_core`，可直接实例化。覆盖纯逻辑、两个节点的接口与行为（含**回避窗口**）、加工脚本与跨进程去重。
-
-规模口径（2026-10-25 实测）：**254 个测试函数**，参数化展开共 **338 个用例**。CHANGELOG 中 5.0.0 记载的「316 项」为当时的展开用例口径；差额来自 5.1.0 新增的 `tests/test_node_cache.py`（13 项）与 `tests/test_character_index.py`（9 项）。
+测试**仅维护在维护者本地工作树**（`tests/`，自 5.1.6 起不进入远端仓库与发布包）：克隆仓库不含测试，质量门禁（pytest / ruff / mypy）由维护者在本地全量执行，CI 对推送的代码运行 ruff 静态检查。
 
 ## 变更记录
 

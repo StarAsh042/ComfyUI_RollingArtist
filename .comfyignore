@@ -7,6 +7,9 @@
 # 测试：运行期不需要，排除可缩小发布物体积与安全扫描面
 tests/
 
+# 项目文档（数据 SOP / 决策记录 / 迭代计划）：与 tests/ 同策，本地独享
+docs/
+
 # CI 与本地开发配置
 .github/
 .pre-commit-config.yaml
