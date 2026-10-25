@@ -201,8 +201,10 @@ class RollingArtistDB:
 
     def __init__(self, path: str) -> None:
         self.path = path
-        # _write_lock：只保护"写事务本身"（BEGIN IMMEDIATE ... COMMIT），
-        # 不覆盖事务内的业务计算，避免把整段生成流程串行化
+        # _write_lock：保护"写事务本身"（BEGIN IMMEDIATE ... COMMIT）。
+        # 注意它只约束"谁在跑事务"，不约束"事务里放什么"——持锁时长由调用方决定：
+        # 只做 check+record 的调用方持锁极短；把整个重试循环放进来（RollingArtist）
+        # 则持锁等于一次完整生成，同库并发会被串行化（详见 generation_lock）。
         self._write_lock = threading.RLock()
         # _local：每线程一个连接。sqlite3 的 Connection 默认不允许跨线程使用
         # （check_same_thread=True），早期实现用一把锁共享单连接，
@@ -244,11 +246,20 @@ class RollingArtistDB:
     def generation_lock(self) -> Iterator["RollingArtistDB"]:
         """把「判重 -> 记录」放进同一把写锁与同一个事务。
 
-        - 进程内：``_write_lock`` 保证同一时刻只有一个写事务在跑，
-          但**只覆盖事务区间**——调用方应在进入本上下文之前完成
-          抽样、权重计算、提示词拼装等纯 CPU 工作，从而缩短持锁时间
+        - 进程内：``_write_lock`` 保证同一时刻只有一个写事务在跑
         - 跨进程：``BEGIN IMMEDIATE`` 抢占写锁，另一个进程会阻塞到本事务结束，
           因此不会出现「两边都判定未测过」而生成同一组合的情况
+
+        **持锁时长 = 调用方在上下文里做的事情**，这一点没有隐藏机制：
+
+        - 只做 ``is_tested`` + ``record`` 的调用方，持锁时间是一次索引查询加一条写入
+        - 需要「判重 -> 生成 -> 记录」整段原子的调用方（``RollingArtist`` 的重试循环：
+          命中已测组合就要重新抽样），必须把抽样也放进来，此时持锁等于一次完整生成，
+          同一数据库上的并发生成会被串行化
+
+        后者是跨进程不重复的代价，不是实现缺陷：把抽样挪到锁外，两个进程仍可能在
+        锁外各抽到同一组合，只是把冲突推迟到写入时才被 ``INSERT OR IGNORE`` 吞掉。
+        实测单次持锁约 9ms（3 个艺术家、默认参数），重试 10 次约 90ms。
 
         若事务期间抛异常则回滚，保证不会留下半截记录。
         """
