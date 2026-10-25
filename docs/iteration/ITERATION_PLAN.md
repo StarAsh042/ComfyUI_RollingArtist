@@ -113,7 +113,7 @@
 | T-13 | CSV 规模硬护栏评估（`CSV_MAX_ROWS` 默认值/流式方案） | P2 可延后 | M | TD-06 |
 | T-14 | 路径防护增强评估（白名单目录配置/TOCTOU 缓解） | P2 可延后 | L | TD-07 |
 | T-15 | 新语言 i18n（按需，如 ja） | P2 可延后 | M | — |
-| T-16 | 作品下拉联动 `custom_csv_path` | P2 **已完成（重定义）** | M | TD-08 | 已合并 main `f2a83f3`（PR #9）：查明 ComfyUI `INPUT_TYPES` 为无参调用（execution.py:885/900、graph.py:91/130、server.py:846），per-instance 下拉联动架构上不可行；按「执行期一致性保障」落地：报错分级（自定义 CSV 场景指明不在该 CSV 并给总量+热门示例）、`CharacterIndex.copyrights` 惰性缓存、tooltip/README 边界说明、4 个新测试。**未发版**（等 5.1.3 定级后随 5.1.4 发布） |
+| T-16 | 作品下拉联动 `custom_csv_path` | P2 **已完成（重定义）** | M | TD-08 | 已合并 main `f2a83f3`（PR #9）并随 5.1.4 发布（main `2d43572`，tag v5.1.4，21:56Z）：查明 ComfyUI `INPUT_TYPES` 为无参调用（execution.py:885/900、graph.py:91/130、server.py:846），per-instance 下拉联动架构上不可行；按「执行期一致性保障」落地：报错分级（自定义 CSV 场景指明不在该 CSV 并给总量+热门示例）、`CharacterIndex.copyrights` 惰性缓存、tooltip/README 边界说明、4 个新测试 |
 | T-17 | 仓库清理：删除 backup 分支；`import_legacy_csv` 标注生命周期 | P2 可延后 | S | TD-13 |
 | T-18 | 数据更新 SOP 文档化（重跑加工脚本的流程与校验） | P2 可延后 | S | — |
 
@@ -428,4 +428,5 @@ feature/xxx ──> dev（日常集成）──> main（发布版本）
 | 发布 | publish.yml 运行成功（24s，run 40188118532）；Registry 5.1.2 = Pending（11:16:02Z，扫描中） |
 | 分支同步 | origin/dev 经合并提交 `a3e5d39` 与 main 内容一致（未使用强推） |
 | Registry 现状 | **5.1.2 / 5.1.1 / 5.1.0 / 5.0.0 四版本全部 Flagged，无 Active 版本**（5.1.1 10:35Z、5.1.2 11:16Z 起扫，21:00Z 前均已定级 Flagged）；`.comfyignore` 收敛验证通过：5.1.0/5.0.0 各 13/12 条 findings（11 条在 tests/）→ 5.1.1/5.1.2 各 3 条且全在 `ra_core/db.py`（sqlite3.connect 被 database_connections + network_operations 双报）与 `ra_core/paths.py`（os.environ 逃生开关），severity 全 info |
-| 误报消除（5.1.3） | 维护者决策改代码不走申诉：5.1.3（main `1135b70`，tag v5.1.3，13:25Z 发布，publish.yml 35s 成功）将两处触发点替换为标准库等价官方形式——`sqlite3.connect()` → `sqlite3.Connection()`（官方连接类，参数一致）、`os.environ.get()` → `os.getenv()`（官方等价函数），338 用例全过、行为零变化；残留风险点（注释/docstring 文字、4 处系统变量 os.environ.get）与分支预案见 `.workbuddy-ai/memory/registry-scan-fix-2026-10-25.md`；**5.1.3 截至 21:45 仍 Pending（已 8+ 小时，既往版本约 2 小时定级——疑似 sqlite3.Connection 构造触发更审重的扫描通道，继续观察）**；T-16 改动已合入 main（未动版本号故未触发发布），待 5.1.3 定级后发 5.1.4 |
+| 误报消除（5.1.3） | 维护者决策改代码不走申诉：5.1.3（main `1135b70`，tag v5.1.3，13:25Z 发布，publish.yml 35s 成功）将两处触发点替换为标准库等价官方形式——`sqlite3.connect()` → `sqlite3.Connection()`（官方连接类，参数一致）、`os.environ.get()` → `os.getenv()`（官方等价函数），338 用例全过、行为零变化；残留风险点（注释/docstring 文字、4 处系统变量 os.environ.get）与分支预案见 `.workbuddy-ai/memory/registry-scan-fix-2026-10-25.md`；**5.1.3 截至 21:45 仍 Pending（已 8+ 小时，既往版本约 2 小时定级——疑似 sqlite3.Connection 构造触发更审重的扫描通道，继续观察）** |
+| T-16 完成 | PR #9 合入 main `f2a83f3`（未动版本号故未触发发布）；21:56 定版 5.1.4：main `2d43572`、tag v5.1.4、publish.yml 成功（run 40199945615），Registry 5.1.4 = Pending（13:57:41Z 起扫）——按维护者决策「先发 5.1.4 不等 5.1.3 定级」，T-16 内容随 5.1.4 上线；当前 Registry：5.1.4/5.1.3 双 Pending、5.1.0/5.0.0 Flagged |
