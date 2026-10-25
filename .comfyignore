@@ -1,0 +1,17 @@
+# Comfy Registry 发布包排除项（.comfyignore）
+# node.zip 只含运行所需文件；运行期资源一律保留：
+#   节点 .py、ra_core/、locales/（nodeDefs.json 前端文案）、
+#   web/docs/（信息面板帮助页，RollingArtist.py 明示依赖）、
+#   danbooru_art_001.csv / danbooru_character_001.csv（默认数据）
+
+# 测试：运行期不需要，排除可缩小发布物体积与安全扫描面
+tests/
+
+# CI 与本地开发配置
+.github/
+.pre-commit-config.yaml
+web/docs/_build_report_html.py
+
+# 数据加工原料（Git LFS 指针文件，非运行期数据；运行期使用 *_001.csv）
+danbooru_art_full.csv
+danbooru_character.csv

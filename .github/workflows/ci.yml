@@ -57,6 +57,21 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
 
+  mypy:
+    name: Mypy
+    runs-on: ubuntu-latest
+    # 第一期非阻断：只报告不作为合并门禁；本地连续 2 周全绿后可转阻断（删去 continue-on-error 并纳入 ci 聚合）
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+      - name: Run mypy
+        run: python -m mypy ra_core RollingArtist.py RollingCharacter.py
+
   ci:
     name: ci
     if: always()
