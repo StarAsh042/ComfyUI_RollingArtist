@@ -3,7 +3,9 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [5.1.4] - 2026-10-25
+
+**作品筛选执行期一致性版本**：ComfyUI 架构内无法做到下拉按实例联动，本版补齐错误指引与边界说明，无行为契约变化（内容即原「未发布」段，按发布纪律定版）。
 
 ### 改进
 
