@@ -26,6 +26,7 @@ from .artists import (
 )
 from .characters import (
     COPYRIGHT_ANY,
+    CharacterIndex,
     CharacterRecord,
     build_character_prompt,
     build_payload,
@@ -33,6 +34,7 @@ from .characters import (
     clear_records_cache,
     copyright_options,
     filter_by_copyright,
+    load_index,
     load_records,
     parse_copyright_filter,
     split_core_tags,
@@ -63,7 +65,7 @@ from .paths import (
     is_path_guard_disabled,
 )
 from .startup import cleanup_default_runtime_files, default_runtime_files
-from .storage import backup_file, parse_tested_row, read_rows
+from .storage import backup_file, file_fingerprint, parse_tested_row, read_rows
 from .weights import (
     DEDUP_MODES,
     WEIGHT_CURVES,
@@ -91,6 +93,7 @@ __all__ = [
     "split_names",
     # characters
     "COPYRIGHT_ANY",
+    "CharacterIndex",
     "CharacterRecord",
     "build_character_prompt",
     "build_payload",
@@ -98,6 +101,7 @@ __all__ = [
     "clear_records_cache",
     "copyright_options",
     "filter_by_copyright",
+    "load_index",
     "load_records",
     "parse_copyright_filter",
     "split_core_tags",
@@ -135,6 +139,7 @@ __all__ = [
     "forbidden_roots",
     "is_path_guard_disabled",
     "backup_file",
+    "file_fingerprint",
     "parse_tested_row",
     "read_rows",
     # weights

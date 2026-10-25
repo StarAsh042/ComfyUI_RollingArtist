@@ -285,6 +285,18 @@ class RollingArtist:
         "当前数据库里已记录的组合数量（字符串形式，可直接接到文本节点查看）",
     )
 
+    @classmethod
+    def IS_CHANGED(cls, custom_csv_path: str = "", **kwargs: Any) -> str:
+        """把 CSV 的文件签名纳入缓存键：文件被替换时强制重算。
+
+        ComfyUI 默认只按输入参数判断缓存是否命中。本节点读的是外部 CSV，
+        参数不变而文件内容被替换时，缓存会一直命中旧结果——用户「换了数据却
+        没效果」。这里返回 ``路径|mtime_ns|size``，CSV 一动指纹就变。
+
+        文件与参数都不变时指纹稳定，缓存行为与之前完全一致（不会变成每次都重算）。
+        """
+        return get_artist_repository().cache_fingerprint(custom_csv_path)
+
     def __init__(self) -> None:
         """初始化节点实例：准备好仓库与状态容器。
 
@@ -413,6 +425,9 @@ class RollingArtist:
         db = get_db(tested_db_path)
 
         # 4) 整段生成处于同一个事务内，进程内 / 跨进程都不会产生重复组合
+        #    重试循环必须待在事务里（命中已测组合就要重新抽样），因此持锁时长
+        #    等于一次完整生成；同库并发生成会被串行化，这是跨进程不重复的代价。
+        #    详见 ra_core.db.generation_lock 的说明。
         with db.generation_lock():
             last_result: Optional[Tuple[List[str], List[float], str]] = None
 

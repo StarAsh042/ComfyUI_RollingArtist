@@ -36,7 +36,7 @@ from .ra_core.characters import (
     build_character_prompt,
     build_payload,
     copyright_options,
-    filter_by_copyright,
+    load_index,
     load_records,
 )
 from .ra_core.constants import (
@@ -62,9 +62,12 @@ def _key_weights(count: int) -> List[float]:
     return [1.0] * count
 
 
-# 作品下拉菜单的选项：注册节点时解析一次默认 CSV（3.4 万行，约 0.5 秒），
-# 之后所有实例共用；用户填的 ``custom_csv_path`` 拿不到，因此不参与构建
+# 作品下拉菜单的选项：按「默认 CSV 的文件签名」缓存（3.4 万行，首次约 0.5 秒）。
+# 用户替换 CSV 后签名变化，菜单会自动重建，不需要重启 ComfyUI。
+# 用户填的 ``custom_csv_path`` 在节点注册阶段拿不到，因此不参与构建。
 _COPYRIGHT_MENU: Optional[List[str]] = None
+_COPYRIGHT_MENU_KEY: Optional[Tuple[str, int, int]] = None
+_COPYRIGHT_LOCK = threading.RLock()
 
 
 def _copyright_menu() -> List[str]:
@@ -72,12 +75,15 @@ def _copyright_menu() -> List[str]:
 
     默认 CSV 缺失或解析失败时退化为只有「不限」一项，绝不让菜单构建失败影响节点注册。
     """
-    global _COPYRIGHT_MENU
-    if _COPYRIGHT_MENU is None:
+    global _COPYRIGHT_MENU, _COPYRIGHT_MENU_KEY
+    repository = get_repository(DEFAULT_CHARACTER_CSV)
+    key = repository.stat_key(repository.resolve_path(""))
+    with _COPYRIGHT_LOCK:
+        if _COPYRIGHT_MENU is not None and key == _COPYRIGHT_MENU_KEY:
+            return _COPYRIGHT_MENU
         options: List[str] = [COPYRIGHT_ANY]
         try:
-            repository = get_repository(DEFAULT_CHARACTER_CSV)
-            options.extend(copyright_options(load_records(repository, "", "trigger")))
+            options.extend(copyright_options(load_index(repository, "", "trigger").records))
         except Exception as error:  # pragma: no cover - 菜单构建必须保持健壮
             LOGGER.error("[RollingCharacter] 构建作品下拉菜单失败: %s", error)
         if len(options) == 1:
@@ -86,7 +92,8 @@ def _copyright_menu() -> List[str]:
                 "请检查 danbooru_character_001.csv 是否就位"
             )
         _COPYRIGHT_MENU = options
-    return _COPYRIGHT_MENU
+        _COPYRIGHT_MENU_KEY = key
+        return _COPYRIGHT_MENU
 
 
 class RollingCharacter:
@@ -255,6 +262,16 @@ class RollingCharacter:
         "当前数据库里已记录的角色组合数量（字符串形式，可直接接到文本节点查看）",
     )
 
+    @classmethod
+    def IS_CHANGED(cls, custom_csv_path: str = "", **kwargs: Any) -> str:
+        """把角色 CSV 的文件签名纳入缓存键：文件被替换时强制重算。
+
+        与 RollingArtist 同源（共用 :func:`ra_core.storage.file_fingerprint`）：
+        参数不变而 CSV 内容变了时，默认缓存会一直返回旧角色列表。
+        文件与参数都不变时指纹稳定，缓存行为不变。
+        """
+        return get_repository(DEFAULT_CHARACTER_CSV).cache_fingerprint(custom_csv_path)
+
     def __init__(self) -> None:
         """初始化节点实例：准备角色仓库、状态容器与“最近记录”窗口。
 
@@ -327,7 +344,10 @@ class RollingCharacter:
 
         # 1) 加载角色记录（内容未变化时直接命中缓存，不重复解析 CSV）
         #    列固定为 trigger：该列恒为「角色标签,作品标签」两段结构
-        records = load_records(self._repo, custom_csv_path, "trigger")
+        #    派生结构（名字列表 / 名字->记录 / 作品筛选下标）随记录一起缓存，
+        #    避免每次执行都在 3.4 万条数据上重建一遍（实测约 19 ms）
+        index = load_index(self._repo, custom_csv_path, "trigger")
+        records = index.records
         if not records:
             raise ValueError(
                 "[RollingCharacter] 未能从 CSV 加载角色列表，请检查文件是否存在、"
@@ -342,7 +362,8 @@ class RollingCharacter:
         force_list = split_names(force_include)
         exclude_set = set(split_names(exclude_characters))
         pick = _text(copyright_pick).strip()
-        allowed = filter_by_copyright(records, "" if pick == COPYRIGHT_ANY else pick)
+        copyright_filter = None if pick == COPYRIGHT_ANY else pick
+        allowed = index.indices_for(copyright_filter)
         if not allowed and not force_list:
             raise ValueError(
                 f"[RollingCharacter] 作品选择={copyright_pick!r} 筛选后没有可用角色"
@@ -350,8 +371,8 @@ class RollingCharacter:
             )
 
         # 名字唯一（默认数据 34,416 行实测无重名），因此可以按名字直接取回记录
-        record_map = {record.name: record for record in records}
-        names = [records[index].name for index in allowed]
+        record_map = index.record_map
+        names = index.names_for(copyright_filter)
         top_count = compute_top_count(len(names), character_top_ratio)
 
         rng_seed = _as_int(seed, 0)
