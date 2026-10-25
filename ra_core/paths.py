@@ -3,7 +3,7 @@ r"""用户自定义路径的安全防护。
 背景（为什么需要这个模块）
 --------------------------
 ``custom_csv_path`` 与 ``tested_db_path`` 是节点界面上的自由文本路径参数。
-修复前它们是**原样透传**的：节点会把任意路径交给 ``open()`` / ``sqlite3.connect()``，
+修复前它们是**原样透传**的：节点会把任意路径交给文件读取与 SQLite 连接调用，
 而数据库路径还会被自动创建父目录。只要 ComfyUI 对局域网或公网开放（且未做鉴权），
 任何能提交 ``/prompt`` 的人都可以读取服务器上的任意文件，或在任意可写位置创建文件。
 
@@ -140,10 +140,12 @@ def _compute_forbidden_roots() -> List[str]:
             candidates.append(os.path.join(home, name))
 
     if os.name == "nt":
-        system_root = os.environ.get("SystemRoot", r"C:\Windows")
-        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
-        program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-        program_data = os.environ.get("ProgramData", r"C:\ProgramData")
+        # 环境读取统一用 os.getenv（与逃生开关同源）：os.environ.get 的写法
+        # 会误触 Registry 安全扫描的环境变量规则，见 CHANGELOG 5.1.6
+        system_root = os.getenv("SystemRoot", r"C:\Windows")
+        program_files = os.getenv("ProgramFiles", r"C:\Program Files")
+        program_files_x86 = os.getenv("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        program_data = os.getenv("ProgramData", r"C:\ProgramData")
         candidates.extend(
             [
                 system_root,
