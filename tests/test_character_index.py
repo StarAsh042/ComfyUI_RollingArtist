@@ -81,6 +81,24 @@ def test_copyright_filter_is_cached_per_name(tmp_path):
     assert index.names_for("touhou") == ["hakurei_reimu"]
 
 
+def test_copyrights_lists_all_works_by_popularity(tmp_path):
+    """copyrights 列出全部作品名，按 count 总和降序（与下拉菜单同一排序）。"""
+    clear_records_cache()
+    path = tmp_path / "c.csv"
+    write_csv(path, ROWS)
+    index = load_index(get_repository(str(path)), "", "trigger")
+    assert index.copyrights == ["vocaloid", "touhou"]
+
+
+def test_copyrights_is_cached(tmp_path):
+    """作品列表惰性计算一次后缓存（重复访问返回同一对象）。"""
+    clear_records_cache()
+    path = tmp_path / "c.csv"
+    write_csv(path, ROWS)
+    index = load_index(get_repository(str(path)), "", "trigger")
+    assert index.copyrights is index.copyrights
+
+
 def test_index_rebuilds_when_csv_changes(tmp_path):
     clear_records_cache()
     path = tmp_path / "c.csv"

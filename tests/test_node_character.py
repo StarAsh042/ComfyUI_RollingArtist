@@ -272,9 +272,28 @@ def test_copyright_pick_is_case_insensitive(node, character_csv, db_path):
     assert {item["copyright"] for item in json.loads(payload_json)["characters"]} == {"genshin_impact"}
 
 
-def test_copyright_pick_without_match_raises(node, character_csv, db_path):
-    with pytest.raises(ValueError, match="筛选后没有可用角色"):
-        run(node, character_csv, db_path, copyright_pick="不存在的作品")
+def test_copyright_pick_without_match_names_custom_csv(node, character_csv, db_path):
+    """填了自定义 CSV 时，报错必须指明「不在你的自定义 CSV 里」并给出该 CSV 的热门示例。
+
+    最常见的困惑：作品下拉只列默认 CSV 的作品，用户选了其中的名字、又填了自定义
+    CSV 路径 -> 在自定义 CSV 里筛不出角色。笼统的「没有可用角色」指不明方向。
+    """
+    with pytest.raises(ValueError, match="不在自定义 CSV 的作品列表中") as info:
+        run(node, character_csv, db_path, copyright_pick="fate_grand_order")
+    message = str(info.value)
+    assert "vocaloid" in message, "热门示例应含 count 最高的作品"
+    assert "作品下拉仅列出默认 CSV" in message
+
+
+def test_copyright_pick_without_match_names_default_csv(node, db_path):
+    """未填自定义 CSV 时，报错指明「不在默认 CSV 的作品列表中」。"""
+    from ComfyUI_RollingArtist.ra_core.constants import DEFAULT_CHARACTER_CSV
+
+    if not os.path.isfile(DEFAULT_CHARACTER_CSV):
+        pytest.skip("尚未生成 danbooru_character_001.csv")
+
+    with pytest.raises(ValueError, match="不在默认 CSV 的作品列表中"):
+        run(node, "", db_path, copyright_pick="不存在的作品")
 
 
 def test_copyright_any_means_no_limit(node, character_csv, db_path):

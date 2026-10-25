@@ -32,6 +32,7 @@ from .ra_core.artists import (
 )
 from .ra_core.characters import (
     COPYRIGHT_ANY,
+    CharacterIndex,
     CharacterRecord,
     build_character_prompt,
     build_payload,
@@ -94,6 +95,32 @@ def _copyright_menu() -> List[str]:
         _COPYRIGHT_MENU = options
         _COPYRIGHT_MENU_KEY = key
         return _COPYRIGHT_MENU
+
+
+# 作品筛选报错时给出的热门作品示例数（帮用户快速对照「这个数据集里有什么」）
+_PICK_HINT_SAMPLE = 5
+
+
+def _copyright_pick_reject_reason(pick: str, index: CharacterIndex, custom_csv_path: str) -> str:
+    """作品筛选结果为空时的报错原因：指明作品名不在哪个数据集里，并给出可用示例。
+
+    用户最常见的困惑：作品下拉只列默认 CSV 的作品，填了自定义 CSV 路径后
+    选了个默认 CSV 的作品名 -> 在自定义 CSV 里筛不出角色。这时必须说清楚
+    「不在你的自定义 CSV 里」，而不是笼统的「没有可用角色」。
+    """
+    copyrights = index.copyrights
+    if copyrights:
+        sample = "、".join(copyrights[:_PICK_HINT_SAMPLE])
+        total = f"共 {len(copyrights)} 部作品，热门示例：{sample}"
+    else:
+        total = "该数据集没有任何作品列数据"
+    if _text(custom_csv_path).strip():
+        return (
+            f"作品选择={pick!r} 不在自定义 CSV 的作品列表中（{total}）。"
+            "作品下拉仅列出默认 CSV 的作品，自定义 CSV 的作品名不会出现在下拉里，"
+            "请直接填写该 CSV 中的作品名（原始写法 fate_(series) 亦可）"
+        )
+    return f"作品选择={pick!r} 不在默认 CSV 的作品列表中（{total}）。请改成“(不限)”或换一个作品"
 
 
 class RollingCharacter:
@@ -209,7 +236,8 @@ class RollingCharacter:
                         "继续输入 ab 会进一步收窄）。“(不限)”表示不筛选。"
                         "同样接受 copyright 列的原始写法 fate_(series) 与 trigger 里"
                         "转义后的写法 fate_\\(series\\)。注意：下拉项来自默认 CSV，"
-                        "换“自定义 CSV 路径”时下拉不会跟着变",
+                        "换“自定义 CSV 路径”时下拉不会跟着变——但筛选会在该 CSV 上生效，"
+                        "其作品名不会出现在下拉里，请直接填写",
                     },
                 ),
                 # ---------------- 输出内容 ----------------
@@ -228,7 +256,9 @@ class RollingCharacter:
                     {
                         "default": "",
                         "advanced": True,
-                        "tooltip": "自定义角色 CSV 的路径；留空使用节点目录下的 danbooru_character_001.csv",
+                        "tooltip": "自定义角色 CSV 的路径；留空使用节点目录下的 danbooru_character_001.csv。"
+                        "作品筛选（“作品”参数）在该 CSV 上生效，但其作品名不会出现在作品下拉里，"
+                        "请直接填写该 CSV 中的作品名",
                     },
                 ),
                 "tested_db_path": (
@@ -367,8 +397,7 @@ class RollingCharacter:
         allowed = index.indices_for(copyright_filter)
         if not allowed and not force_list:
             raise ValueError(
-                f"[RollingCharacter] 作品选择={copyright_pick!r} 筛选后没有可用角色"
-                "（请改成“(不限)”或换一个作品）"
+                "[RollingCharacter] " + _copyright_pick_reject_reason(pick, index, custom_csv_path)
             )
 
         # 名字唯一（默认数据 34,416 行实测无重名），因此可以按名字直接取回记录

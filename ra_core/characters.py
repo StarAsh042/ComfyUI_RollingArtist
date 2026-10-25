@@ -344,7 +344,14 @@ class CharacterIndex:
     并发下可能被重复构建一次，但内容相同、写入幂等，不影响结果。
     """
 
-    __slots__ = ("records", "names", "record_map", "_by_copyright", "_names_by_copyright")
+    __slots__ = (
+        "records",
+        "names",
+        "record_map",
+        "_by_copyright",
+        "_names_by_copyright",
+        "_copyrights",
+    )
 
     def __init__(self, records: List[CharacterRecord]) -> None:
         self.records = records
@@ -352,6 +359,7 @@ class CharacterIndex:
         self.record_map = {record.name: record for record in records}
         self._by_copyright: Dict[str, List[int]] = {}
         self._names_by_copyright: Dict[str, List[str]] = {}
+        self._copyrights: Optional[List[str]] = None
 
     def indices_for(self, copyright_name: Optional[str]) -> Sequence[int]:
         """作品筛选后的记录下标；``None`` 表示不筛选（返回 ``range``，零分配）。"""
@@ -372,6 +380,17 @@ class CharacterIndex:
             cached = [self.records[index].name for index in self.indices_for(copyright_name)]
             self._names_by_copyright[copyright_name] = cached
         return cached
+
+    @property
+    def copyrights(self) -> List[str]:
+        """该数据集全部作品名（按热度降序）；惰性计算一次并缓存。
+
+        与下拉菜单同一排序（``copyright_options``）：该作品下所有角色 count 之和降序。
+        报「作品不在列表里」类错误时用它给出总量与热门示例，帮助用户自行纠正。
+        """
+        if self._copyrights is None:
+            self._copyrights = copyright_options(self.records)
+        return self._copyrights
 
 
 _INDEX_CACHE: "OrderedDict[Tuple[str, str, int, int], CharacterIndex]" = OrderedDict()
