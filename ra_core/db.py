@@ -434,6 +434,11 @@ class RollingArtistDB:
     def import_legacy_csv(self, path: str, kind: str = KIND_ARTIST) -> Optional[Tuple[int, int]]:
         """把旧版 CSV 记录导入数据库，返回 ``(新增条数, 读取条数)``。
 
+        **生命周期说明**：这是 4.x → 5.0.0 记录体系迁移（文本 CSV → SQLite）的一次性
+        迁移工具，**没有生产调用方**（节点运行期不调用，仅测试引用）。保留它是为了
+        老用户升级时能把手头的旧记录文件并进新库；新部署无需使用。后续若记录格式
+        再演变，本方法随旧格式一起淘汰，不做兼容承诺。
+
         使用 ``INSERT OR IGNORE``，因此可以重复调用：已导入过的组合会被跳过，
         重复导入不会产生重复记录（幂等）。读取失败时返回 None。
 

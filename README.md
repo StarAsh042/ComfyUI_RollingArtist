@@ -133,6 +133,8 @@ python modify_danbooru_art.py -n 100     # 换成 count >= 100
 - **角色文件的 `character` 列没有转义**（只处理 trigger），带括号的仍有 16,380 条（如 `ganyu_(genshin_impact)`）；这些括号进提示词会被权重解析器当分组语法吃掉，需精确匹配请自行加工该列
 - `trigger` 段内连字符会变成下划线（`itomugi-kun` → `itomugi_kun`），想保留原始连字符改 `danbooru_csv_tool.transform_text` 一处
 
+> 更新 / 更换数据的完整流程（取数、LFS 纪律、校验清单、回滚、提交约定）见 [`docs/DATA-UPDATE-SOP.md`](docs/DATA-UPDATE-SOP.md)。
+
 ## 参与开发
 
 > **给外部贡献者的重要说明**

@@ -3,6 +3,13 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 工程 / 文档
+
+- **T-17 仓库清理**：删除本地备份分支 `backup/pre-rebuild-20261022-233943`（仓库 10-22 重建前的平行历史；内容已被 5.0.0 完整包含，删除前经树对比核验零损失，该分支从未推送 origin）；`ra_core/db.py` 的 `import_legacy_csv` 补生命周期标注——4.x → 5.0.0 记录体系迁移（文本 CSV → SQLite）的一次性迁移工具，无生产调用方（仅测试引用），后续随旧格式淘汰不做兼容承诺
+- **T-18 数据更新 SOP**：新增 [`docs/DATA-UPDATE-SOP.md`](docs/DATA-UPDATE-SOP.md)——重跑加工脚本的完整流程（源数据获取与 LFS 纪律、两个加工脚本的参数与阈值留痕、pytest + 实物四项抽查的校验清单、`.bak` 与 git 双轨回滚、提交约定），README 数据预处理段挂链接
+
 ## [5.1.4] - 2026-10-25
 
 **作品筛选执行期一致性版本**：ComfyUI 架构内无法做到下拉按实例联动，本版补齐错误指引与边界说明，无行为契约变化（内容即原「未发布」段，按发布纪律定版）。
