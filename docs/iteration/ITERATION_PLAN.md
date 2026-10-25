@@ -415,3 +415,16 @@ feature/xxx ──> dev（日常集成）──> main（发布版本）
 | 发布 | publish.yml 运行成功（24s）；Registry 5.1.1 = Pending（10:35:38Z，扫描中，预计数小时转 Active） |
 | 分支同步 | origin/dev 经合并提交 `e3375c3` 与 main 内容一致（未使用强推） |
 | 冒烟踩坑 | ComfyUI 0.42.5 的 outputs 缓存为纯内存（重启即冷启动，无磁盘持久化）；execution_cached 消息每次执行均播报，判定必须看 payload nodes 列表 |
+
+### 5.1.2 发布与 OD 决策关闭（2026-10-25 晚）
+
+| 项 | 结果 |
+|----|------|
+| 决策 | OD-01 / OD-02 经维护者拍板均按**方案 A** 关闭（回避窗口维持实例内存；默认库维持启动即清空），`docs/decisions/OPEN-DECISIONS.md` 两条置 RESOLVED 并补 Resolution 与后续触发条件 |
+| 落实 | 两节点 `tested_db_path` tooltip 补默认库启动即清空提示；角色节点 `character_count` tooltip 补窗口语义（内存/重启清零/多实例独立）；README 补多实例独立表述；`locales/zh` 与代码 tooltip 28 条逐字对齐（修复存量漂移），`locales/en` 同步 |
+| 版本变更 | pyproject 5.1.1 → 5.1.2；CHANGELOG「未发布」段定版为 5.1.2（提示与文档强化，无运行时行为变化） |
+| 门禁 | pytest / ruff check / ruff format --check / mypy 本地全绿；CRLF 纯净 |
+| 合并 | PR #7（dev→main）squash 合并 → main `9029838`；tag `v5.1.2` 已推送 |
+| 发布 | publish.yml 运行成功（24s，run 40188118532）；Registry 5.1.2 = Pending（11:16:02Z，扫描中） |
+| 分支同步 | origin/dev 经合并提交 `a3e5d39` 与 main 内容一致（未使用强推） |
+| Registry 现状 | **5.1.2 / 5.1.1 / 5.1.0 / 5.0.0 四版本全部 Flagged，无 Active 版本**（5.1.1 10:35Z、5.1.2 11:16Z 起扫，21:00Z 前均已定级 Flagged）；`.comfyignore` 收敛验证通过：5.1.0/5.0.0 各 13/12 条 findings（11 条在 tests/）→ 5.1.1/5.1.2 各 3 条且全在 `ra_core/db.py`（sqlite3.connect 被 database_connections + network_operations 双报）与 `ra_core/paths.py`（os.environ 逃生开关），severity 全 info；申诉稿已按四版本实况更新于 `.workbuddy-ai/memory/registry-appeal-draft-2026-10-25.md`，渠道为 Comfy-Org/registry-backend 提 issue，**待用户确认后提交（已从可选变为必需：无 Active 版本新用户无法安装）** |

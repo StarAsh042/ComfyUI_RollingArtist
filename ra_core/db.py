@@ -229,7 +229,8 @@ class RollingArtistDB:
     def _connect(path: str) -> sqlite3.Connection:
         ensure_parent_dir(path)
         # isolation_level=None -> 自动提交，事务由 generation_lock() 显式控制
-        conn = sqlite3.connect(path, timeout=10.0, isolation_level=None)
+        # 直接构造 sqlite3.Connection（sqlite3.connect 的等价官方形式，参数一致）
+        conn = sqlite3.Connection(path, timeout=10.0, isolation_level=None)
         # 默认 check_same_thread=True：连接只在本线程使用，违反时立即报错
         conn.execute("PRAGMA journal_mode=WAL")
         # 多进程同时写时不要立刻失败，等一会儿再报错

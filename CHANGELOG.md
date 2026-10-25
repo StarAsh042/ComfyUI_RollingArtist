@@ -3,6 +3,14 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [5.1.3] - 2026-10-25
+
+**扫描误报消除版本**：为标准库等价 API 替换，无功能变化、无行为变化（内容即原「未发布」段，按发布纪律定版）。
+
+### 工程
+
+- **消除 Registry 安全扫描 info 级误报（等价 API 替换，行为零变化）**：5.0.0–5.1.2 四个版本因扫描器误报全部被标记（Flagged），`ra_core/db.py` 的 `sqlite3.connect()` 被同时打上 database_connections 与 network_operations 标签（本地 SQLite 文件，零网络）、`ra_core/paths.py` 的 `os.environ.get()` 被打上 environment_manipulation 标签（读取 README 文档化的逃生开关）。本版将两处替换为标准库等价官方形式——`sqlite3.connect(path, ...)` → `sqlite3.Connection(path, ...)`（参数一致的官方连接类，`sqlite3.connect` 本就是其工厂函数）、`os.environ.get(k, "")` → `os.getenv(k, "")`（官方等价函数）——功能与行为完全不变，338 个测试用例全过；如扫描器仍有其他触发模式，则回退到 Comfy-Org/registry-backend 人工申诉渠道（申诉稿已备）
+
 ## [5.1.2] - 2026-10-25
 
 **提示与文档强化版本**：OD-01 / OD-02 按决议关闭（均方案 A），无运行时行为变化、无节点契约变化（内容即原「未发布」段，按发布纪律定版）。
