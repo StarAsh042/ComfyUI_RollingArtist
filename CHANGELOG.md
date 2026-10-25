@@ -3,7 +3,9 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [5.1.5] - 2026-10-25
+
+**仓库治理版本**：P2 维护项收官（仓库清理 + 数据更新 SOP），无运行时行为变化（内容即原「未发布」段，按发布纪律定版）。
 
 ### 工程 / 文档
 
