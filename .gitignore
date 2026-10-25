@@ -10,6 +10,15 @@
 .workbuddy-ai
 CODEBUDDY.md
 
+# 测试与项目文档：按维护者策略仅保留在本地工作树（2026-10-25 起），
+# 不进远端仓库，从而也不进 Registry 发布包（.comfyignore 同步排除 /docs/）。
+# 两条都前导 / 锚定仓库根：无锚定的 docs/ 会误伤 web/docs/（运行期信息面板），
+# 无锚定的 tests/ 会误伤未来可能出现的子包测试目录。
+# 本地 pytest / mypy 不受影响；ruff 目录扫描遵循 .gitignore 会跳过 tests/，
+# 需要检查测试代码时显式加 --no-respect-gitignore。
+/tests/
+/docs/
+
 # 运行期记录：默认 SQLite 数据库（含 WAL 附带文件）与旧版 CSV 记录
 *.sqlite
 *.sqlite-wal

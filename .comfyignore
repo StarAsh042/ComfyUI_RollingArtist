@@ -7,6 +7,11 @@
 # 测试：运行期不需要，排除可缩小发布物体积与安全扫描面
 tests/
 
+# 项目文档（数据 SOP / 决策记录 / 迭代计划）：与 tests/ 同策，本地独享。
+# 必须前导 / 锚定仓库根：无锚定的 docs/ 会按 gitwildmatch 语义把
+# web/docs/（运行期信息面板，见上方保留清单）一并排除。
+/docs/
+
 # CI 与本地开发配置
 .github/
 .pre-commit-config.yaml

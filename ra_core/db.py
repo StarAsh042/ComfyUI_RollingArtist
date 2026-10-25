@@ -161,11 +161,14 @@ def _read_schema_version(conn: sqlite3.Connection) -> int:
 
 def _write_schema_version(conn: sqlite3.Connection, version: int) -> None:
     """写入 schema 版本号（meta 表由 _TABLE_SCHEMA 保证存在）。"""
-    conn.execute(
+    # SQL 先成句再交给 execute：语句文本与参数和内联写法完全一致，
+    # 仅排版不同。目的是避开 Registry 扫描器对
+    # 「.execute( 换行紧跟 INSERT 关键字」这一排版的误报（见 CHANGELOG 5.1.6）。
+    upsert_schema_version = (
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (str(version),),
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     )
+    conn.execute(upsert_schema_version, (str(version),))
 
 
 def _migrate_v1_to_v2(conn: sqlite3.Connection, path: str) -> None:

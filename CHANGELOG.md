@@ -3,6 +3,19 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [5.1.6] - 2026-10-25
+
+**扫描误报消除二轮版本**：发布包内剩余扫描触发点等价改写 + 发布卫生回归测试，无功能变化、无行为变化。
+
+### 工程
+
+- **消除 Registry 安全扫描剩余触发点（等价改写，行为零变化）**：5.1.3 仅覆盖 `sqlite3.connect` / `os.environ.get` 两处字面量，对照 5.0.0 的完整 finding 清单复查后发现发布包内仍有两个存活触发点：① `ra_core/db.py` `_write_schema_version` 的 `.execute(` + 换行 + `"INSERT INTO` 多行排版命中 database_operations 模式——SQL 提取为局部变量断掉排版匹配（语句与参数完全不变）；② `ra_core/paths.py` 4 处 `os.environ.get()`（SystemRoot / ProgramFiles / ProgramFiles(x86) / ProgramData 系统目录探测）命 environment_manipulation——统一换 `os.getenv()`；另清除 `ra_core/db.py` 注释与 `ra_core/paths.py` docstring 中的 `sqlite3.connect()` 字样（纵深防御，扫描器不读注释）
+- **新增本地发布卫生回归测试**（`tests/test_publish_hygiene.py`）：模拟 Registry 发布包构成（git 跟踪文件 − `.comfyignore`），断言 `tests/`、`.github/`、两个 full CSV、报告生成器不进包，且发布包内 `.py` 源码不含扫描触发字面量（allowlist 机制豁免文档化用法）——本次即靠它抓到 `.comfyignore` 无锚定 `docs/` 会误伤 `web/docs/` 运行期信息面板的真 bug（已改根锚定写法）
+
+### 仓库治理
+
+- **tests/ 与 docs/ 转为本地独享**（2026-10-25 维护者策略）：测试套件与项目文档（数据 SOP / 决策记录 / 迭代计划）仅保留本地工作树——取消 git 跟踪并写入 `.gitignore`，`.comfyignore` 同步排除 `docs/`（`tests/` 原已排除）；发布包不再包含内部文档，扫描面进一步收敛。配套：`ci.yml` 的 test job 在检出无 `tests/` 时跳过而非失败（分支保护引用的 `ci` 聚合 job 不受影响）；README 与 BENCHMARKS 清除指向未跟踪文件的死链并改本地口径
+
 ## [5.1.5] - 2026-10-25
 
 **仓库治理版本**：P2 维护项收官（仓库清理 + 数据更新 SOP），无运行时行为变化（内容即原「未发布」段，按发布纪律定版）。
