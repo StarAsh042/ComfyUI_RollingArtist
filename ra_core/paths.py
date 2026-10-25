@@ -92,7 +92,8 @@ class PathNotAllowedError(ValueError):
 
 def is_path_guard_disabled() -> bool:
     """是否通过环境变量显式关闭了路径防护。"""
-    return str(os.environ.get(ALLOW_ANY_PATH_ENV, "")).strip().lower() in _TRUTHY
+    # os.getenv 与 os.environ.get 等价（官方文档互为别名）
+    return str(os.getenv(ALLOW_ANY_PATH_ENV, "")).strip().lower() in _TRUTHY
 
 
 def _comfy_root() -> str:
