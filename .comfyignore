@@ -12,6 +12,13 @@ tests/
 # web/docs/（运行期信息面板，见上方保留清单）一并排除。
 /docs/
 
+# CHANGELOG：非运行期文件，且历史段落引用标准库 API 名称（sqlite3
+# 连接工厂、environ 读取、INSERT 排版等）会被 Registry 安全扫描器按
+# 字面量命中——5.1.5 实测 7 条 finding 中 6 条源自 CHANGELOG 与
+# ITERATION_PLAN 文档，排除文档从根上收敛扫描面（Registry 页面
+# changelog 字段本就为空字符串，排除无展示损失）。
+/CHANGELOG.md
+
 # CI 与本地开发配置
 .github/
 .pre-commit-config.yaml
