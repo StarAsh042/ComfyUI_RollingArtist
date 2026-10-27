@@ -70,6 +70,10 @@
       "tested_db_path": {
         "name": "Records DB Path",
         "tooltip": "Path of the SQLite records database; leave empty to use rollingartist.sqlite in the node directory. Tested records live here, so changing the path resets dedup progress. The database at the default path is cleared on every startup; set an explicit path to keep it across sessions."
+      },
+      "csv_max_rows": {
+        "name": "CSV Read Limit",
+        "tooltip": "Maximum number of CSV records to read (includes the header row; 0 = unlimited). Records beyond the limit are not loaded, so the candidate pool and top pool shrink accordingly; the default 0 keeps the full read identical to older versions. Set a positive value when the table is large and only the first part is needed, to cut read time and memory."
       }
     },
     "outputs": {
@@ -134,6 +138,10 @@
       "tested_db_path": {
         "name": "Records DB Path",
         "tooltip": "Path of the SQLite records database; leave empty for rollingcharacter.sqlite in the node directory (separate from the artist node). The database at the default path is cleared on every startup — set an explicit path to keep it across sessions. It only stores the output history, so changing the path does not reset the \"no repeat within the last 10 outputs\" window (that window lives in memory, is cleared on restart, and each node instance keeps its own)."
+      },
+      "csv_max_rows": {
+        "name": "CSV Read Limit",
+        "tooltip": "Maximum number of CSV records to read (includes the header row; 0 = unlimited). Records beyond the limit are not loaded, so the candidate pool, copyright menu and popularity pool shrink accordingly; the default 0 keeps the full read identical to older versions. Set a positive value when the table is large and only the first part is needed, to cut read time and memory."
       }
     },
     "outputs": {

@@ -12,7 +12,7 @@ import random
 import threading
 from collections import OrderedDict
 from itertools import chain
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 from .constants import CSV_READ_ENCODING, DEFAULT_ARTIST_CSV, LOGGER
 from .paths import check_csv_path
@@ -35,8 +35,50 @@ __all__ = [
 # CSV 文件大小保护：超过该阈值时给出 WARNING（整表载入内存可能拖垮进程）
 CSV_SIZE_WARN_BYTES = 100 * 1024 * 1024
 
-# 单次读取的最大行数（None = 不限制）。留作紧急护栏，默认不启用
+# 单次读取的最大记录数（None = 不限制）。这是**进程级默认值**，生产代码从不赋值
+# （只有测试用 monkeypatch 改它），真正的上限由调用方按参数传入（见 normalize_max_rows）。
+# 保留它是因为：① 它是节点 csv_max_rows 未设置时的兜底；② 既有测试以它作为全局开关。
 CSV_MAX_ROWS: Optional[int] = None
+
+
+def normalize_max_rows(value: Optional[int]) -> Optional[int]:
+    """校验并归一化「读取上限」：只接受 ``None`` 或**正整数**。
+
+    这是内部读取 API 的唯一入口校验，不做静默容错——把 ``0`` 当成「不限制」、
+    把负数当成「不限」、把字符串当数字，都会让用户以为限流生效而实际没有，
+    或反过来把「不限制」误读成「读 0 条」。因此非法值一律报配置错误。
+
+    参数:
+        value: ``None``（不限制）或正整数（最多消费的记录条数）
+
+    异常:
+        ValueError: 传入了 ``0``、负数、``bool`` 或非整数类型
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"[RollingArtist] 读取上限必须是 None 或正整数，当前值: {value!r}")
+    if not isinstance(value, int):
+        raise ValueError(f"[RollingArtist] 读取上限必须是 None 或正整数，当前值: {value!r}")
+    if value <= 0:
+        raise ValueError(
+            f"[RollingArtist] 读取上限必须是 None 或正整数（0 表示不限制请传 None），当前值: {value!r}"
+        )
+    return value
+
+
+def resolve_max_rows(max_rows: Optional[int]) -> Optional[int]:
+    """解析「本次读取的有效上限」：显式参数优先，否则回落到模块级 :data:`CSV_MAX_ROWS`。
+
+    两条来源都走 :func:`normalize_max_rows` 校验，因此非法值不会被静默吞掉。
+    有效上限必须进入缓存键（见 :meth:`ArtistRepository.load` / ``load_rows``），
+    否则「改上限」会命中旧缓存——实测改造前 5 层缓存会全部 stale。
+    """
+    explicit = normalize_max_rows(max_rows)
+    if explicit is not None:
+        return explicit
+    return normalize_max_rows(CSV_MAX_ROWS)
+
 
 # 被识别为表头的单元格（小写、空格/短横线归一为下划线后比较）
 HEADER_TOKENS = frozenset(
@@ -144,14 +186,31 @@ def resolve_layout(sample_row: Sequence[str], spec: str, has_header: bool):
     return 0
 
 
-def parse_artist_rows(rows: Iterable[Sequence[str]], column: Optional[str] = COLUMN_AUTO) -> List[str]:
+def parse_artist_rows(
+    rows: Iterable[Sequence[str]],
+    column: Optional[str] = COLUMN_AUTO,
+    max_rows: Optional[int] = None,
+) -> List[str]:
     """从 CSV 行迭代器中解析艺术家名列表。
 
     参数:
         rows: 行迭代器（``csv.reader`` 即可，无需预先读入内存）
         column: ``auto``（默认，自动识别表头/列）、``all``（展平所有列）、
                 列索引（``"0"``）或表头列名（``"artist"``）
+        max_rows: 最多消费的记录条数（``None`` = 不限制）。
+
+    **计数基准（D-04 = 方案 A）**：``max_rows`` 数的是「``csv.reader`` 产出的记录」，
+    **含表头行、含空记录**。这是 v5.2.0 统一后的唯一定义，``load_rows`` 路径也按
+    同一基准计数（见 :meth:`ArtistRepository._iter_csv_rows`）。
+
+    历史坑（改造前）：本函数与 ``_csv_rows`` 的计数对象不同——这里不计表头但计空记录，
+    那里计表头但丢弃空记录，同一文件同一 N 会返回不同条数。现在统一到「含表头、
+    含空记录」，两条路径对同一 CSV 同一 N 必须返回一致的记录集。
+
+    **exact-N 不谎称截断**：只有「确实还有记录没被消费」时才告警。改造前用
+    ``len(rows) >= CSV_MAX_ROWS`` 判断，恰好 N 条的文件也会打「已截断」，是误报。
     """
+    limit = normalize_max_rows(max_rows)
     spec = normalize_column_spec(column)
     iterator = iter(rows)
 
@@ -173,14 +232,11 @@ def parse_artist_rows(rows: Iterable[Sequence[str]], column: Optional[str] = COL
     artists: List[str] = []
     # 首行不是表头时它本身就是数据行，需要一并处理
     body = iterator if has_header else chain((first,), iterator)
+    truncated = False
     consumed = 0
     for row in body:
-        if CSV_MAX_ROWS is not None and consumed >= CSV_MAX_ROWS:
-            LOGGER.warning(
-                "[RollingArtist] CSV 行数达到上限 %d 已截断（parse_artist_rows）"
-                "（如需读取全部内容，请调大 CSV_MAX_ROWS）",
-                CSV_MAX_ROWS,
-            )
+        if limit is not None and consumed >= limit:
+            truncated = True
             break
         consumed += 1
         if not row:
@@ -195,6 +251,13 @@ def parse_artist_rows(rows: Iterable[Sequence[str]], column: Optional[str] = COL
             name = str(cell or "").strip().lstrip("\ufeff")
             if name:
                 artists.append(name)
+
+    if truncated:
+        LOGGER.warning(
+            "[RollingArtist] 已达到读取上限 %d，后续记录未参与加载"
+            "（如需读取全部内容，请把 csv_max_rows 设为 0 或调大该值）",
+            limit,
+        )
     return artists
 
 
@@ -209,8 +272,8 @@ class ArtistRepository:
     def __init__(self, default_path: str = DEFAULT_ARTIST_CSV) -> None:
         self.default_path = default_path
         self._lock = threading.RLock()
-        self._cache: OrderedDict[Tuple[str, str, int, int], List[str]] = OrderedDict()
-        self._rows_cache: OrderedDict[Tuple[str, int, int], List[List[str]]] = OrderedDict()
+        self._cache: OrderedDict[Tuple[str, str, int, int, int], List[str]] = OrderedDict()
+        self._rows_cache: OrderedDict[Tuple[str, int, int, int], List[List[str]]] = OrderedDict()
 
     # ------------------------------------------------------------------
     # 加载
@@ -319,95 +382,214 @@ class ArtistRepository:
         return value
 
     def load(
-        self, custom_path: Optional[str] = None, column: Optional[str] = COLUMN_AUTO
+        self,
+        custom_path: Optional[str] = None,
+        column: Optional[str] = COLUMN_AUTO,
+        max_rows: Optional[int] = None,
     ) -> Tuple[List[str], Optional[Tuple[str, int, int]]]:
         """加载艺术家列表，返回 ``(artists, stat_key)``。
 
-        失败时返回空列表并记录日志，不抛出异常，由调用方决定如何报错。
+        **有效上限进缓存键**（AC-C05）：键从 ``(路径, 列, mtime, size)`` 扩成
+        ``(路径, 列, mtime, size, limit)``，改上限必然重建，不会命中旧结果。
         """
         path = self.resolve_path(custom_path)
         spec = normalize_column_spec(column)
+        limit = resolve_max_rows(max_rows)
         stat_key = self.stat_key(path)
-        cache_key = (stat_key[0], spec, stat_key[1], stat_key[2]) if stat_key else None
+        cache_key = (
+            (stat_key[0], spec, stat_key[1], stat_key[2], limit if limit is not None else 0)
+            if stat_key
+            else None
+        )
 
         if cache_key is None:
-            return self._read(path, spec), stat_key
-        artists = self._cached_load(self._cache, cache_key, lambda: self._read(path, spec))
+            return self._read(path, spec, limit), stat_key
+        artists = self._cached_load(self._cache, cache_key, lambda: self._read(path, spec, limit))
         return artists, stat_key
 
-    def _csv_rows(self, path: str, max_rows: Optional[int] = None) -> List[List[str]]:
-        """读取整份 CSV 为行列表（丢弃空行）；任何失败都记日志并返回空列表。
+    def _iter_csv_rows(
+        self,
+        path: str,
+        state: Optional[Dict[str, bool]] = None,
+        max_rows: Optional[int] = None,
+    ) -> Iterator[List[str]]:
+        """**流式**产出 CSV 的非空行，不把整份文件读成列表。
 
-        这是两条读取路径（:meth:`_read` / :meth:`_read_rows`）的公共入口，
-        把「体积告警 + 打开失败 + 读取期解码/CSV 错误」三类异常收敛到一处。
+        这是 :meth:`_read`（画师解析）与 :meth:`open_rows`（角色解析）的数据源，
+        与 :meth:`_csv_rows` 的区别只有一个：**逐条产出而不是先攒成 List**。
+        因此「整份原始行列表 + 最终对象」的双份驻留被消除，解析器拿到一条就处理一条。
 
         参数:
-            max_rows: 非 None 时读满这么多行即**停止读取**（不是读完再切片）。
-                这是护栏的关键语义：``CSV_MAX_ROWS`` 存在的意义就是在文件
-                异常巨大时止损，读满即 break 才能避免"只想取 100 行却付了
-                读完 40 万行的代价"（实测 6 MB / 40 万行需 0.68 s）。
+            state: 可选的失败标记字典。读取期发生解码 / CSV / IO 错误时置
+                ``state["failed"] = True``，由调用方决定「整份作废」（见 :meth:`_read`）。
+                为什么用外部标记而不是抛异常：错误发生在**迭代过程中**，而调用方
+                已经拿到前几条记录，无法再回退；用一个可查的标记让调用方在迭代
+                结束后统一作废，才能保持「任一读错误则空结果」的既有语义。
+            max_rows: 最多消费的**原始记录**条数（``None`` = 不限制）。
 
-        **为什么返回列表而不是上下文管理器/生成器**：``UnicodeDecodeError``
-        与 ``csv.Error`` 是在**迭代行**时抛出的，而不是 ``open()`` 时。
-        若用 ``@contextmanager`` 写成 "yield 行迭代器，except 里再 yield None"，
-        异常实际上是在调用方的 ``with`` 块内（消费迭代器时）抛出，
-        此时生成器已 yield 过一次，无法二次 yield —— 会触发
-        ``RuntimeError: generator didn't stop after throw()``（已实测复现）。
-        因此在**一个**生成器内部完成读取与异常兜底，把结果一次交付。
+        **计数基准（D-04 = 方案 A）**：计的是 ``csv.reader`` 产出的每一条记录，
+        **含空记录**（空记录会被跳过不产出，但**计入**上限）。这是两条读取路径的
+        唯一计数实现——``_csv_rows`` 也委托到这里，因此 ``load`` 与 ``load_rows``
+        对同一 CSV 同一 N 消费的记录数必然一致。
+
+        达到上限即 ``return``（不是读完再切），因此「只想取前 N 条」不会付出读完
+        整个大文件的代价（实测 6 MB / 40 万行全读需 0.68 s）。
+
+        **异常兜底必须写在生成器内部**（历史教训）：``UnicodeDecodeError`` 与
+        ``csv.Error`` 是在**迭代行**时抛出的，不是 ``open()`` 时。若用
+        ``@contextmanager`` 写成 "yield 迭代器，except 里再 yield None"，异常会在
+        调用方 ``with`` 块内（消费迭代器时）抛出，此时生成器已 yield 过一次、
+        无法二次 yield —— 触发 ``RuntimeError: generator didn't stop after throw()``
+        （已实测复现）。所以读取与兜底放在**同一个**生成器里。
         """
+        limit = normalize_max_rows(max_rows)
         handle = self._open_csv(path)
         if handle is None:
-            return []
-        rows: List[List[str]] = []
+            if state is not None:
+                state["failed"] = True
+            return
+        consumed = 0
         try:
             with handle:
                 for row in csv.reader(handle):
+                    if limit is not None and consumed >= limit:
+                        # 走到这里说明「第 limit+1 条」已经被产出了 —— 它正是判断
+                        # 「是否真有余量」所需的证据，**零额外读盘**。文件恰好 N 条时
+                        # 循环会自然结束、走不到这里，因此 exact-N 不会误报截断（AC-C04）。
+                        if state is not None:
+                            state["truncated"] = True
+                        return
+                    consumed += 1
                     if not row:
                         continue
-                    rows.append(row)
-                    if max_rows is not None and len(rows) >= max_rows:
-                        break
+                    yield row
         except UnicodeDecodeError as error:
             LOGGER.error("[RollingArtist] CSV 编码无法解析（请使用 UTF-8）: %s -> %s", path, error)
-            return []
+            if state is not None:
+                state["failed"] = True
         except (OSError, csv.Error) as error:
             LOGGER.error("[RollingArtist] CSV 读取失败: %s -> %s", path, error)
+            if state is not None:
+                state["failed"] = True
+
+    def open_rows(
+        self, custom_path: Optional[str] = None, max_rows: Optional[int] = None
+    ) -> Tuple[Iterator[List[str]], Dict[str, bool], Optional[Tuple[str, int, int]]]:
+        """流式打开 CSV，返回 ``(行迭代器, 失败标记, stat_key)``。
+
+        供需要多列数据的调用方（RollingCharacter 要同时用 trigger / copyright /
+        core_tags / count）使用，**不写 ``_rows_cache``** —— 这是 AC-C06 的要求：
+        角色正常加载不应常驻一份原始行列表。
+
+        与 :meth:`load_rows` 的关系：``load_rows`` 是保留的兼容入口（返回 List 并缓存），
+        本方法是新增的流式入口，两者读同一份文件、同一套路径解析与体积告警，
+        并按同一基准（D-04：含表头、含空记录）应用 ``max_rows``。
+
+        调用方必须：① 消费完迭代器后检查失败标记，为真则整份作废；
+        ② 在不再消费时 ``close()`` 迭代器，避免文件句柄悬空。
+        """
+        path = self.resolve_path(custom_path)
+        stat_key = self.stat_key(path)
+        state: Dict[str, bool] = {"failed": False}
+        return self._iter_csv_rows(path, state, max_rows), state, stat_key
+
+    def _csv_rows(self, path: str, max_rows: Optional[int] = None) -> List[List[str]]:
+        """把流式行迭代器收集成列表（丢弃空行）；任何失败都记日志并返回空列表。
+
+        改造后本方法只是 :meth:`_iter_csv_rows` 的**收集壳**：计数、提前停止与
+        异常兜底全部收敛到流式实现里，两条路径不再各写一份逻辑——这正是
+        v5.2.0 之前「同一文件同一 N 两条路径返回不同条数」的根因。
+
+        保留它是因为 ``load_rows`` 需要返回 ``List``（公开兼容入口，AC-C06 要求）。
+        """
+        state: Dict[str, bool] = {"failed": False}
+        rows = list(self._iter_csv_rows(path, state, max_rows))
+        if state["failed"]:
             return []
         return rows
 
-    def _read(self, path: str, spec: str) -> List[str]:
-        # 截断由下游 parse_artist_rows 内的 CSV_MAX_ROWS 负责（它按「消费到的行数」计数）
-        artists = parse_artist_rows(self._csv_rows(path), spec)
+    def _read_rows_with_flag(self, path: str, max_rows: Optional[int]) -> Tuple[List[List[str]], bool]:
+        """读整份行并同时返回「是否确实还有余量未被消费」（供告警准确性用）。
+
+        为什么不在外层再探一次：多读一遍会把「读满即停」变成「读满再读一遍」，
+        实测会让截断场景的读取行数翻倍（50 条上限时读到 103 行），直接违背
+        护栏的初衷。这里让流式实现自己在**碰到第 limit+1 条时**置位，零额外开销。
+        """
+        state: Dict[str, bool] = {"failed": False, "truncated": False}
+        rows = list(self._iter_csv_rows(path, state, max_rows))
+        if state["failed"]:
+            return [], False
+        return rows, state["truncated"]
+
+    def _read(self, path: str, spec: str, max_rows: Optional[int] = None) -> List[str]:
+        """把 CSV 记录**流式**交给解析器，不再先攒一份原始行列表。
+
+        改造前这里是 ``parse_artist_rows(self._csv_rows(path), spec)``：先把整份
+        CSV 读成 ``List[List[str]]``，再交给解析器产出艺术家列表，冷加载时两份
+        结构同时驻留。解析器本来就接受 ``Iterable``（见 :func:`parse_artist_rows`
+        签名与实现：只迭代一次、不依赖 ``len``/切片），因此直接喂迭代器即可。
+
+        **上限只在流式层应用一次**：``_iter_csv_rows`` 负责计数与提前停止，
+        这里不再把 ``max_rows`` 传给解析器——否则会二次计数（实测会少取一条）。
+
+        错误语义保持不变：读取期任一解码 / CSV / IO 错误会让整份作废并返回空列表
+        （``state["failed"]``），而不是返回「出错前已解析出的前缀」——后者会让
+        用户在文件损坏时拿到看似正常的残缺候选池，比直接报错更难排查。
+        """
+        limit = normalize_max_rows(max_rows)
+        state: Dict[str, bool] = {"failed": False, "truncated": False}
+        artists = parse_artist_rows(self._iter_csv_rows(path, state, limit), spec)
+        if state["failed"]:
+            return []
+        if state["truncated"]:
+            LOGGER.warning(
+                "[RollingArtist] 已达到读取上限 %d，后续记录未参与加载: %s"
+                "（如需读取全部内容，请把 csv_max_rows 设为 0 或调大该值）",
+                limit,
+                path,
+            )
         if not artists:
             LOGGER.warning("[RollingArtist] CSV 中未解析到任何艺术家: %s", path)
         return artists
 
     def load_rows(
-        self, custom_path: Optional[str] = None
+        self, custom_path: Optional[str] = None, max_rows: Optional[int] = None
     ) -> Tuple[List[List[str]], Optional[Tuple[str, int, int]]]:
         """读取并缓存整份 CSV 行，返回 ``(rows, stat_key)``。
 
         与 :meth:`load` 共用同一套「文件签名」缓存策略，供需要多列的节点使用
         （例如 RollingCharacter 要同时用 trigger / copyright / core_tags / count）。
         行内保持原始顺序，表头行也在其中，由调用方自行判断。
+
+        **有效上限进缓存键**（AC-C05）：键从 ``stat_key`` 扩成 ``stat_key + (limit,)``。
+        改造前键只有文件签名，改上限会命中旧缓存——实测「上限 3→6」时 5 层缓存
+        全部 stale，而 ``_rows_cache`` 命中还会掩盖下层 records/index 的失效。
         """
         path = self.resolve_path(custom_path)
+        limit = resolve_max_rows(max_rows)
         stat_key = self.stat_key(path)
         if stat_key is None:
-            return self._read_rows(path), stat_key
-        rows = self._cached_load(self._rows_cache, stat_key, lambda: self._read_rows(path))
+            return self._read_rows(path, limit), stat_key
+        cache_key = stat_key + (limit if limit is not None else 0,)
+        rows = self._cached_load(self._rows_cache, cache_key, lambda: self._read_rows(path, limit))
         return rows, stat_key
 
-    def _read_rows(self, path: str) -> List[List[str]]:
-        """读整份 CSV 为行列表；超过 :data:`CSV_MAX_ROWS` 时**读满即停**并告警。"""
-        if CSV_MAX_ROWS is None:
+    def _read_rows(self, path: str, max_rows: Optional[int] = None) -> List[List[str]]:
+        """读整份 CSV 为行列表；超过有效上限时**读满即停**并告警。
+
+        **exact-N 不谎称截断**（AC-C04）：只有「确实还有记录未被消费」时才告警。
+        改造前用 ``len(rows) >= CSV_MAX_ROWS`` 判断，恰好 N 条的文件也报「已截断」，
+        是误报。现在由流式实现在碰到第 limit+1 条时置位，**不额外读盘**。
+        """
+        limit = normalize_max_rows(max_rows)
+        if limit is None:
             return self._csv_rows(path)
-        rows = self._csv_rows(path, max_rows=CSV_MAX_ROWS)
-        if len(rows) >= CSV_MAX_ROWS:
+        rows, truncated = self._read_rows_with_flag(path, limit)
+        if truncated:
             LOGGER.warning(
-                "[RollingArtist] CSV 行数达到上限 %d，已截断读取: %s"
-                "（如需读取全部内容，请调大 CSV_MAX_ROWS）",
-                CSV_MAX_ROWS,
+                "[RollingArtist] 已达到读取上限 %d，后续记录未参与加载: %s"
+                "（如需读取全部内容，请把 csv_max_rows 设为 0 或调大该值）",
+                limit,
                 path,
             )
         return rows

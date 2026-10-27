@@ -273,6 +273,21 @@ class RollingCharacter:
                         "（那个窗口在内存里，重启清零、多实例各自独立）",
                     },
                 ),
+                # ---------------- 高级：CSV 读取上限（追加在最后，见下方兼容性说明） ----------------
+                "csv_max_rows": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 1000000,
+                        "step": 1000,
+                        "advanced": True,
+                        "tooltip": "CSV 读取上限（条记录，含表头；0 = 不限制）。"
+                        "超过上限的记录不参与加载，候选池、作品菜单与热度池会相应变小；"
+                        "默认 0 保持与旧版完全一致的全量读取。"
+                        "表很大且只想用前一部分时可设为正整数以降低读取耗时与内存",
+                    },
+                ),
             },
         }
 
@@ -356,11 +371,16 @@ class RollingCharacter:
         describe_character: bool = True,
         custom_csv_path: str = "",
         tested_db_path: str = "",
+        csv_max_rows: int = 0,
     ) -> Tuple[str, str, str]:
         """生成角色列表。
 
         形参顺序与界面参数顺序一致（ComfyUI 按关键字传参，顺序只影响外部脚本按位置调用）。
         读取的 CSV 列固定为 ``trigger``（「角色标签,作品标签」两段结构），不可配置。
+
+        参数:
+            csv_max_rows: CSV 读取上限（条记录，含表头；``0`` = 不限制）。
+                新增参数**追加在形参表末尾**，因此按位置调用的外部脚本不受影响。
 
         不重复的规则很简单：把最近 :data:`_RECENT_RECORDS` 条输出记录里出现过的角色名
         从候选里排除；只有当窗口把候选全部吃掉时才退回「允许重复」并输出 WARNING。
@@ -373,11 +393,17 @@ class RollingCharacter:
         if count < 1:
             raise ValueError(f"[RollingCharacter] character_count 必须 >= 1，当前值: {character_count!r}")
 
+        # 0) 读取上限：0 = 不限制（映射为 None）；其他值必须是正整数
+        limit = _as_int(csv_max_rows, 0)
+        max_rows = None if limit == 0 else limit
+        if max_rows is not None and max_rows < 0:
+            raise ValueError(f"[RollingCharacter] csv_max_rows 必须 >= 0，当前值: {csv_max_rows!r}")
+
         # 1) 加载角色记录（内容未变化时直接命中缓存，不重复解析 CSV）
         #    列固定为 trigger：该列恒为「角色标签,作品标签」两段结构
         #    派生结构（名字列表 / 名字->记录 / 作品筛选下标）随记录一起缓存，
         #    避免每次执行都在 3.4 万条数据上重建一遍（实测约 19 ms）
-        index = load_index(self._repo, custom_csv_path, "trigger")
+        index = load_index(self._repo, custom_csv_path, "trigger", max_rows=max_rows)
         records = index.records
         if not records:
             raise ValueError(

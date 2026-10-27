@@ -269,6 +269,21 @@ class RollingArtist:
                         "默认路径的库每次启动会被清空（不跨会话累积），想跨会话保留请指向自己的文件",
                     },
                 ),
+                # ---------------- 高级：CSV 读取上限（追加在最后，见下方兼容性说明） ----------------
+                "csv_max_rows": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 1000000,
+                        "step": 1000,
+                        "advanced": True,
+                        "tooltip": "CSV 读取上限（条记录，含表头；0 = 不限制）。"
+                        "超过上限的记录不参与加载，候选池与 Top 池会相应变小；"
+                        "默认 0 保持与旧版完全一致的全量读取。"
+                        "表很大且只想用前一部分时可设为正整数以降低读取耗时与内存",
+                    },
+                ),
             },
         }
 
@@ -371,6 +386,7 @@ class RollingArtist:
         max_attempts: int = 10,
         weight_curve: str = "flat",
         tested_db_path: str = "",
+        csv_max_rows: int = 0,
     ) -> Tuple[str, str, str]:
         """生成艺术家提示词。
 
@@ -379,6 +395,8 @@ class RollingArtist:
 
         参数:
             tested_db_path: 记录数据库路径（空 = 节点目录下的 rollingartist.sqlite）
+            csv_max_rows: CSV 读取上限（条记录，含表头；``0`` = 不限制）。
+                新增参数**追加在形参表末尾**，因此按位置调用的外部脚本不受影响。
 
         读取的 CSV 列固定为 ``trigger``（提示词可直接使用的列：空格与括号已转义），不可配置；
         CSV 里没有该列时回退到首列并记 WARNING。
@@ -391,9 +409,15 @@ class RollingArtist:
         if count < 1:
             raise ValueError(f"[RollingArtist] artist_count 必须 >= 1，当前值: {artist_count!r}")
 
+        # 0) 读取上限：0 = 不限制（映射为 None）；其他值必须是正整数
+        limit = _as_int(csv_max_rows, 0)
+        max_rows = None if limit == 0 else limit
+        if max_rows is not None and max_rows < 0:
+            raise ValueError(f"[RollingArtist] csv_max_rows 必须 >= 0，当前值: {csv_max_rows!r}")
+
         # 1) 加载艺术家列表（内容未变化时直接命中缓存，不重复解析 CSV）
         #    列固定为 trigger：该列已转义，可直接进提示词
-        artists, _ = self._repo.load(custom_csv_path, "trigger")
+        artists, _ = self._repo.load(custom_csv_path, "trigger", max_rows=max_rows)
         if not artists:
             raise ValueError(
                 "[RollingArtist] 未能从 CSV 加载艺术家列表，请检查文件是否存在、"
