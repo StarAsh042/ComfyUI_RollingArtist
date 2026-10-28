@@ -23,3 +23,14 @@ CODEBUDDY.md
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# 构建与工具缓存产物（v5.2.0 补）：`pip install -e ".[dev]"` 会在仓库根生成
+# ComfyUI_RollingArtist.egg-info/，而它此前不在任何忽略规则里 —— 本地执行安装
+# 会弄脏 `git status`，进而干扰「改动文件清单与计划比对」这一步门禁。
+# 三个缓存目录多数情况下由 git 默认行为兜底，这里显式声明以免不同 git 版本差异。
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

@@ -71,6 +71,7 @@ Notes:
 |---|---|---|
 | `custom_csv_path` | STRING | Custom artist CSV path; leave empty for `danbooru_art_001.csv` in the node directory |
 | `tested_db_path` | STRING | SQLite records database path; leave empty for `rollingartist.sqlite` in the node directory. Tested records live here, so changing it resets dedup progress |
+| CSV read limit (`csv_max_rows`) | INT | Maximum number of CSV records consumed per read (**includes the header row**; 0 = unlimited, default 0). Records beyond the limit are not loaded, so the candidate pool and top pool shrink accordingly; set a positive value when the table is large and only the first part is needed |
 
 ## Generation flow
 

@@ -43,6 +43,7 @@ git clone https://github.com/StarAsh042/ComfyUI_RollingArtist.git
 - `dedup_mode`（默认 `none`）：`none` 不去重（仍记录）；`full_prompt` 顺序与权重全同才算重复；`artist_set` 只看集合；`artist_list` 比较排序后名字。完整对比见 [`web/docs/RollingArtist/zh.md`](web/docs/RollingArtist/zh.md)
 - `max_attempts`（1-100，默认 10）：重试上限；仍全命中时接受最后一次并打 WARNING
 - `custom_csv_path` / `tested_db_path`：留空用默认 CSV / `rollingartist.sqlite`；**换数据库路径等于重置去重进度**
+- `csv_max_rows`（默认 0 = 不限制）：一次读取最多消费多少条 CSV 记录（**含表头行**）。超过上限的记录不参与加载，候选池与 Top 池会相应变小；表很大且只想用前一部分时设正整数，可降低读取耗时与内存。**默认 0 与旧版行为完全一致**
 
 固定读 `trigger` 列（已转义，如 `hammer_\(sunset_beach\)`）。没有该列时**回退首列**并记 WARNING；若输出里出现数字或网址（把 `count`、`url` 当成了人名），就是这种情况。
 
@@ -68,6 +69,7 @@ ganyu_\(genshin_impact\),genshin_impact,1girl,horns
 | `copyright_pick` | COMBO | 列出全部作品（默认约 3,460 个，按 count 总和降序、并列按名字升序），首项 `(不限)`；可打字筛选、忽略大小写。**下拉项来自默认 CSV**：填了 `custom_csv_path` 时下拉不会跟着变，但筛选在该 CSV 上生效——其作品名请直接填写（原始写法 `fate_(series)` 亦可）；选了个该 CSV 里没有的作品时，报错会列出该 CSV 的作品总数与热门示例 |
 | `describe_character` | BOOLEAN | 每行末尾拼上角色描述；默认开启 |
 | `custom_csv_path` / `tested_db_path` | STRING | 留空用 `danbooru_character_001.csv` / `rollingcharacter.sqlite`（与画师分开）；作品筛选在 `custom_csv_path` 指向的 CSV 上生效 |
+| `csv_max_rows` | INT | 一次读取最多消费多少条 CSV 记录（**含表头行**；默认 0 = 不限制）。超过上限的记录不参与加载，候选池、作品菜单与热度池会相应变小；**默认 0 与旧版行为完全一致** |
 
 角色节点**不做权重分配**（故无 `weight_*` / `sort_by_weight`）；输出**不接受前缀包装**（没有画师那样的 `artists_prefix` 开关）；**没有去重模式参数**，改用固定规则的窗口。
 
@@ -163,7 +165,7 @@ pytest -q
 
 ## 测试
 
-测试套件覆盖纯逻辑、两个节点的接口与行为（含**回避窗口**）、加工脚本与跨进程去重，**不需要 ComfyUI** 即可运行。规模口径（2026-10-25 实测）：**254 个测试函数**，参数化展开共 **338 个用例**；CHANGELOG 中 5.0.0 记载的「316 项」为当时的展开用例口径，差额来自 5.1.0 新增的节点缓存与角色索引两组测试（13 + 9 项）。
+测试套件覆盖纯逻辑、两个节点的接口与行为（含**回避窗口**）、加工脚本与跨进程去重，**不需要 ComfyUI** 即可运行。规模口径（2026-10-28 实测）：**304 个测试函数**，参数化展开共 **396 个用例**；CHANGELOG 中 5.0.0 记载的「316 项」与 5.1.x 记载的「254 函数 / 338 用例」均为各自时点的口径，差额来自后续版本新增的节点缓存、角色索引、发布卫生与 CSV 上限/流式读取等测试组。
 
 测试**仅维护在维护者本地工作树**（`tests/`，自 5.1.6 起不进入远端仓库与发布包）：克隆仓库不含测试，质量门禁（pytest / ruff / mypy）由维护者在本地全量执行，CI 对推送的代码运行 ruff 静态检查。
 

@@ -24,16 +24,28 @@ r"""用户自定义路径的安全防护。
 同时保留写入侧的额外校验：数据库文件若**已存在且不是 SQLite 文件**，拒绝写入，
 避免"往任意文件里灌 SQLite 页"这种破坏。
 
+可选的管理员白名单（配置文件通道）
+----------------------------------
+黑名单只能拦截"已知危险目录"，无法阻止把文件写到任意其它位置。需要更强约束的
+部署方（例如对公网开放、多用户共用）可以在节点目录下放一个 ``ra_config.json``::
+
+    {"csv_allowed_roots": ["D:\\datasets"], "db_allowed_roots": ["D:\\datasets"]}
+
+配置存在时，用户自定义的 CSV / 数据库路径必须落在对应根目录内；配置**只收窄**，
+通过白名单后仍要经过 UNC 拒绝与黑名单。配置不存在 = 不启用白名单（保持现有行为）。
+配置无效、或与逃生开关同时生效时一律 fail closed（宁拒绝不放行）。
+
 逃生开关：环境变量 ``ROLLINGARTIST_ALLOW_ANY_PATH=1`` 完全关闭防护
 （仅在单机自用、不对局域网/公网开放时使用）。
 
 本模块不依赖 ComfyUI，可独立导入与测试。
 """
 
+import json
 import os
 import re
 import threading
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 from .constants import LOGGER, NODE_DIR
 
@@ -42,6 +54,8 @@ __all__ = [
     "is_path_guard_disabled",
     "forbidden_roots",
     "clear_forbidden_cache",
+    "clear_allowlist_cache",
+    "CONFIG_FILE_NAME",
     "check_path",
     "check_csv_path",
     "check_db_path",
@@ -198,14 +212,20 @@ def _is_within(target: str, root: str) -> bool:
     """判断 target 是否等于 root 或位于 root 之下（均已规范化）。
 
     用 ``os.path.commonpath`` 而非字符串前缀，避免 ``/data`` 误判 ``/database``。
+
+    比较前两侧都过 ``os.path.normcase``：Windows 路径大小写不敏感，而
+    ``commonpath`` 返回的是**输入的大小写**（实测 ``commonpath('c:\\data\\x', 'C:\\Data')``
+    为 ``'c:\\data'``）。根目录尚不存在时（白名单首次部署的常见情形）``realpath``
+    不会统一大小写，缺这一步会把合法路径误判成「不在范围内」。
     """
     if os.path.normcase(target) == os.path.normcase(root):
         return True
     try:
-        return os.path.commonpath([target, root]) == root
+        common = os.path.commonpath([target, root])
     except ValueError:
-        # 不同盘符（Windows）会抛 ValueError，视为不在范围内
+        # 不同盘符（Windows）或 UNC 与盘符路径混用会抛 ValueError，视为不在范围内
         return False
+    return os.path.normcase(common) == os.path.normcase(root)
 
 
 def _node_real() -> str:
@@ -282,8 +302,20 @@ def _strip_ads(text: str) -> str:
     return text[: 2 + index] if text[1:2] == ":" else text[:index]
 
 
+# D-05 决策（用户已拍板）：管理共享**只**还原这些本机主机形态。
+# 其它主机（``127.0.0.2``、``localhost.``、本机名、FQDN、任意 IP）一律保持 UNC，
+# 交由 ``check_path`` 的 UNC 拒绝分支处理——而不是被静默降级成本机同名盘符路径。
+# 主机名在 Windows 上大小写不敏感，因此匹配时用 re.IGNORECASE。
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "[::1]", "::1")
+
+_UNC_ADMIN_SHARE_RE = re.compile(
+    r"^\\\\(" + "|".join(re.escape(host) for host in _LOOPBACK_HOSTS) + r")\\([A-Za-z])\$(?=[\\/]|$)",
+    re.IGNORECASE,
+)
+
+
 def _resolve_unc_to_drive(text: str) -> str:
-    r"""把本机 UNC 管理共享路径还原为盘符路径，便于与黑名单比较。
+    r"""把**本机** UNC 管理共享路径还原为盘符路径，便于与黑名单比较。
 
     ``os.path.realpath`` **不会**把 ``\\localhost\C$\Windows`` 规范化成
     ``C:\Windows``，因此基于盘符的黑名单对它完全失效（安全复核实测确认）。
@@ -292,16 +324,20 @@ def _resolve_unc_to_drive(text: str) -> str:
 
     - ``\\localhost\C$\Windows\x``  -> ``C:\Windows\x``
     - ``\\127.0.0.1\D$\data``      -> ``D:\data``
+    - ``\\[::1]\C$\x`` / ``\\::1\C$\x`` -> ``C:\x``
     - ``\\?\UNC\localhost\C$\x``   -> ``C:\x``（在剥离扩展前缀之后就已是 UNC 形式）
-    - 其它主机/共享（``\\server\share``）无法映射到本地盘符，原样返回，
-      交由调用方按"非本机路径"处理。
+
+    **只**还原 :data:`_LOOPBACK_HOSTS` 里的本机主机形态。其它主机的 ``X$`` 共享
+    （``\\evil-host\C$\...``、``\\attacker.example.com\C$\...``、``\\192.168.1.50\C$\...``）
+    **原样返回**，由 ``check_path`` 按"非本机路径"直接拒绝；不还原是为了避免把
+    「访问远程共享」的意图静默降级成「读写本机同名盘符路径」。
     """
     if os.name != "nt":
         return text
-    match = re.match(r"^\\\\[^\\/]+\\([A-Za-z])\$(?=[\\/]|$)", text)
+    match = _UNC_ADMIN_SHARE_RE.match(text)
     if not match:
         return text
-    drive = match.group(1).upper()
+    drive = match.group(2).upper()
     rest = text[match.end() :].lstrip("\\/")
     return f"{drive}:\\{rest}" if rest else f"{drive}:\\"
 
@@ -311,12 +347,233 @@ def _canonicalize(user_path: str) -> str:
 
     依次：去引号 -> 剥离 Windows 扩展前缀 / UNC 前缀 -> 还原本机盘符 ->
     剥离 ADS -> abspath -> realpath（解析 ``..`` 与符号链接）。
+
+    ``realpath`` 对**不可达的网络位置**会抛 ``OSError``（实测 ``\\\\127.0.0.2\\C$\\...``
+    -> WinError 1231）。此时退回 ``abspath`` 结果，让 :func:`check_path` 的 UNC
+    拒绝分支给出可操作的 ``PathNotAllowedError``，而不是把裸 ``OSError`` 抛给用户。
+    退回分支不影响安全性：只有 UNC 路径会走退回，而 UNC 路径随后必被拒绝；
+    本机路径的 ``OSError`` 照常上抛，不会被静默放过。
     """
     text = str(user_path).strip().strip('"').strip("'")
     text = _normalize_windows_path(text)
     text = _resolve_unc_to_drive(text)
     text = _strip_ads(text)
-    return os.path.realpath(os.path.abspath(text))
+    absolute = os.path.abspath(text)
+    try:
+        return os.path.realpath(absolute)
+    except OSError:
+        if absolute.replace("/", "\\").startswith("\\\\"):
+            return absolute
+        raise
+
+
+# ----------------------------------------------------------------------
+# 管理员白名单（配置文件通道，D-01 = A：不新增任何环境变量读取）
+# ----------------------------------------------------------------------
+# 配置文件放在节点目录下（与 ra_core/ 同级，随节点分发但默认不存在）。
+CONFIG_FILE_NAME = "ra_config.json"
+
+# 路径类别 -> 配置键。白名单只约束**用户可填写的**自定义 CSV / DB 路径，
+# 包内默认 CSV / DB 由调用方在空路径时直接返回，根本不会走到这里。
+_KIND_CSV = "csv"
+_KIND_DB = "db"
+_CONFIG_KEYS = {_KIND_CSV: "csv_allowed_roots", _KIND_DB: "db_allowed_roots"}
+_KIND_LABELS = {_KIND_CSV: "自定义 CSV 路径", _KIND_DB: "记录数据库路径"}
+
+# 白名单的进程级缓存：``None`` = 尚未读取过；``()`` = 明确未启用白名单。
+#
+# 只缓存「允许根列表」而不是每次重读配置，理由与 ``_FORBIDDEN_CACHE`` 相同：
+# 它位于每次数据加载的必经路径上（``resolve_path`` -> ``check_csv_path``）。
+# 配置在进程生命周期内不会变，改配置后重启 ComfyUI 即可；测试用
+# :func:`clear_allowlist_cache` 强制重读。
+_ALLOWED_ROOTS: Optional[Tuple[Tuple[str, ...], Tuple[str, ...]]] = None
+_ALLOWLIST_LOCK = threading.RLock()
+
+
+def _config_path() -> str:
+    """白名单配置文件路径（节点目录下 ``ra_config.json``）。"""
+    return os.path.join(NODE_DIR, CONFIG_FILE_NAME)
+
+
+def clear_allowlist_cache() -> None:
+    """清除白名单缓存，强制下次校验重新读取 ``ra_config.json``。
+
+    测试、热重载或管理员手改配置后使用。
+    """
+    global _ALLOWED_ROOTS
+    with _ALLOWLIST_LOCK:
+        _ALLOWED_ROOTS = None
+
+
+def _load_allowlist() -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """读取并缓存白名单配置，返回 ``(csv 允许根, db 允许根)``。
+
+    语义（计划 4.2 规则 1/2/3/5，以及陷阱 2/3/4/5）：
+
+    - 文件不存在 -> ``((), ())``，表示**未启用**白名单（保持现有黑名单行为）。
+    - 文件存在但 JSON 非法 / 顶层不是对象 / 两个键都没有 / 某个列表为空 /
+      根目录不是绝对路径或无法规范化 -> 抛 :class:`PathNotAllowedError`（fail closed），
+      并给出可操作错误（写到哪个文件、哪个键、期望什么）。
+    - 根目录逐个走**与 target 相同的** :func:`_canonicalize`（含 UNC 映射、剥尾分隔符），
+      再 ``normcase`` 后缓存；比较时用 :func:`_is_within`（两侧均已 normcase）。
+    - 裸盘符 ``D:`` 会被 ``abspath`` 解析成进程 CWD（Windows 盘符相对语义），
+      与管理员「整个 D 盘」的直觉不符，因此显式拒绝并要求写 ``D:\\\\``。
+    """
+    global _ALLOWED_ROOTS
+    cached = _ALLOWED_ROOTS
+    if cached is not None:
+        return cached
+    with _ALLOWLIST_LOCK:
+        if _ALLOWED_ROOTS is None:
+            _ALLOWED_ROOTS = _read_allowlist()
+        return _ALLOWED_ROOTS
+
+
+def _read_allowlist() -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """实际读取 ``ra_config.json``（开销只发生一次，由 :func:`_load_allowlist` 缓存）。"""
+    path = _config_path()
+    if not os.path.exists(path):
+        # 文件不存在 = 不启用白名单：保持 5.1.7 的黑名单行为，不新增任何 stat/open 热路径开销
+        return ((), ())
+
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as error:
+        LOGGER.error("[RollingArtist] 白名单配置读取失败: %s -> %s", path, error)
+        raise PathNotAllowedError(
+            f"[RollingArtist] 路径白名单配置无法读取，已按 fail-closed 拒绝所有自定义路径：\n"
+            f"  配置文件：{path}\n"
+            f"  错误：{error}\n"
+            f'请修正该 JSON 文件（结构：{{"csv_allowed_roots": [...], "db_allowed_roots": [...]}}），'
+            f"或删除它以恢复默认的黑名单行为"
+        ) from error
+
+    if not isinstance(data, dict):
+        raise _allowlist_invalid(path, "顶层必须是 JSON 对象")
+
+    present = [key for key in _CONFIG_KEYS.values() if key in data]
+    if not present:
+        raise _allowlist_invalid(
+            path,
+            f'未配置任何白名单键（需要 "{_CONFIG_KEYS[_KIND_CSV]}" 或 "{_CONFIG_KEYS[_KIND_DB]}" 之一）；'
+            "若不需要白名单请删除该文件",
+        )
+
+    roots: List[Tuple[str, ...]] = []
+    for kind in (_KIND_CSV, _KIND_DB):
+        key = _CONFIG_KEYS[kind]
+        if key not in data:
+            # 只配置了一类：另一类保持不启用（不因单类配置影响另一类）
+            roots.append(())
+            continue
+        raw = data[key]
+        if not isinstance(raw, list) or not raw:
+            raise _allowlist_invalid(path, f'"{key}" 必须是非空数组')
+        normalized: List[str] = []
+        seen = set()
+        for item in raw:
+            if not isinstance(item, str) or not item.strip():
+                raise _allowlist_invalid(path, f'"{key}" 的每一项都必须是非空字符串')
+            text = item.strip()
+            # 裸盘符（"D:"）在 Windows 上表示「D 盘当前目录」而不是 D 盘根，容易造成
+            # 「以为放行了整个 D 盘、实际只放行了进程 CWD」的误解 -> 显式拒绝
+            drive, tail = os.path.splitdrive(text)
+            if drive and not tail:
+                raise _allowlist_invalid(
+                    path,
+                    f'"{key}" 中的 "{text}" 是裸盘符，请写成 "{drive}\\\\" 表示整个盘',
+                )
+            if not os.path.isabs(text):
+                raise _allowlist_invalid(
+                    path,
+                    f'"{key}" 中的 "{text}" 不是绝对路径（相对路径会按进程 CWD 解析，结果不可预期）',
+                )
+            try:
+                root = _canonicalize(text)
+            except OSError as error:  # pragma: no cover - realpath 已兜底 OSError
+                raise _allowlist_invalid(path, f'"{key}" 中的 "{text}" 无法规范化：{error}') from error
+            if root.replace("/", "\\").startswith("\\\\"):
+                # 节点自身拒绝一切 UNC 路径，UNC 根永远匹配不到任何合法目标，
+                # 静默接受只会让管理员以为配置生效 -> 明确报错
+                raise _allowlist_invalid(
+                    path,
+                    f'"{key}" 中的 "{text}" 是网络共享（UNC）路径；白名单根必须是本机盘符路径',
+                )
+            # 与 target 同源规范化后再 normcase，避免「根 / 目标」两侧大小写不一致
+            key_norm = os.path.normcase(root)
+            if key_norm not in seen:
+                seen.add(key_norm)
+                normalized.append(root)
+        roots.append(tuple(normalized))
+    return (roots[0], roots[1])
+
+
+def _allowlist_invalid(path: str, reason: str) -> PathNotAllowedError:
+    """构造「白名单配置无效」的 fail-closed 错误（文案统一，便于用户照做）。"""
+    return PathNotAllowedError(
+        f"[RollingArtist] 路径白名单配置无效，已按 fail-closed 拒绝所有自定义路径：\n"
+        f"  配置文件：{path}\n"
+        f"  问题：{reason}\n"
+        f'请修正该 JSON 文件（结构：{{"csv_allowed_roots": [...], "db_allowed_roots": [...]}}，'
+        f'每项为绝对目录路径，例如 "D:\\\\datasets"），或删除它以恢复默认的黑名单行为'
+    )
+
+
+def _check_allowlist(target: str, kind: str) -> None:
+    """白名单校验：target 必须落在 ``kind`` 对应的某个允许根内。
+
+    调用点固定在 :func:`check_path` 里 ``_canonicalize`` 之后、``is_path_guard_disabled``
+    **之前**（计划陷阱 7）：逃生开关会直接 ``return``，插在它之后就永远无法实现
+    「白名单 + 逃生开关 = fail closed」。
+
+    本函数**只拒绝不放行**：通过后仍须继续走 UNC 拒绝与黑名单循环（规则 4）。
+
+    **节点目录豁免**（计划 4.2 规则 3）：包内默认 CSV / DB 是受信任的运行资源，
+    节点目录内的路径不参与白名单校验。理由：① 默认路径由 ``resolve_path`` 在
+    空路径时直接返回，本来就不经过这里；但用户可能把默认 CSV 的完整路径**显式**
+    写进 ``custom_csv_path``（旧工作流里并不少见），若不放行会在启用白名单后
+    突然报错；② 该目录的内容由维护者随节点分发，管理员配置白名单不是为了
+    限制它；③ 现有代码在 :func:`check_path` 里本就对本节点目录单独处理
+    （只拦源码覆写、数据文件放行），这里保持一致。
+    """
+    if _is_within(target, _node_real()):
+        return
+
+    csv_roots, db_roots = _load_allowlist()
+    if not csv_roots and not db_roots:
+        # 配置文件不存在（或两类都未配置）-> 白名单未启用，保持现有黑名单行为
+        return
+
+    if is_path_guard_disabled():
+        # 规则 2：白名单与逃生开关同时生效 -> fail closed。
+        # 逃生开关的既有语义是「关闭全部防护」，与白名单「只收窄」的语义互斥，
+        # 静默二选一都会让管理员误判当前生效的边界，因此直接报错。
+        raise PathNotAllowedError(
+            f"[RollingArtist] 路径白名单与 {ALLOW_ANY_PATH_ENV} 同时生效，已拒绝该路径：\n"
+            f"  请求路径：{target}\n"
+            f"  配置文件：{_config_path()}\n"
+            f"两者语义互斥（白名单收窄、环境变量关闭防护），无法判断应以哪个为准。\n"
+            f"请二选一：删除配置文件以完全关闭防护，或取消环境变量以启用白名单"
+        )
+
+    allowed = csv_roots if kind == _KIND_CSV else db_roots
+    if not allowed:
+        # 只配置了另一类：本类不启用白名单（互不影响）
+        return
+
+    if any(_is_within(target, root) for root in allowed):
+        return
+
+    label = _KIND_LABELS[kind]
+    roots_text = "\n".join(f"  - {root}" for root in allowed)
+    LOGGER.error("[RollingArtist] 拒绝白名单外的%s：%s", label, target)
+    raise PathNotAllowedError(
+        f"[RollingArtist] {label}不在管理员配置的允许目录内，已拒绝：\n"
+        f"  请求路径：{target}\n"
+        f"  允许目录：\n{roots_text}\n"
+        f"请把文件放到上述目录之一，或由管理员修改 {_config_path()} 中的白名单配置"
+    )
 
 
 def check_path(
@@ -331,19 +588,28 @@ def check_path(
     参数:
         user_path: 用户输入的路径
         what: 出错信息里的名称（如 "自定义 CSV 路径"）
-        for_write: 写入场景下额外校验（已存在的非 SQLite 文件不允许当数据库写）
+        for_write: 写入场景。决定白名单用 ``db_allowed_roots`` 还是
+            ``csv_allowed_roots``（``check_db_path`` 传 ``True``，CSV 侧保持默认）
         extra_forbidden: 调用方额外指定的禁止目录
 
     返回:
         已 ``realpath`` 规范化的绝对路径（文件可以尚不存在）
 
     异常:
-        PathNotAllowedError: 路径命中受保护目标且未关闭防护
+        PathNotAllowedError: 路径命中受保护目标、落在管理员白名单之外，
+            或白名单配置本身无效（fail closed）
     """
     if user_path is None or not str(user_path).strip():
         raise PathNotAllowedError(f"{what}为空")
 
     target = _canonicalize(user_path)
+
+    # 【白名单插入点】固定在 ``_canonicalize`` 之后、``is_path_guard_disabled`` 之前：
+    # 逃生开关会在下一行直接 return，白名单若插在其后，「白名单 + 逃生开关 = fail closed」
+    # 永远无法触发（计划陷阱 7）。同时这里也早于「节点目录早退」，因此不会被
+    # ``paths.py:363-372`` 那个分支绕过（陷阱 8）。
+    # 白名单只收窄不放行：通过后仍须走下面的 UNC 拒绝与黑名单循环（规则 4）。
+    _check_allowlist(target, _KIND_DB if for_write else _KIND_CSV)
 
     if is_path_guard_disabled():
         return target

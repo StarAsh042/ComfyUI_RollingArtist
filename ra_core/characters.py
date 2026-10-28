@@ -18,6 +18,7 @@
 import re
 import threading
 from collections import OrderedDict
+from itertools import chain
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 from .artists import (
@@ -27,6 +28,7 @@ from .artists import (
     is_header_row,
     normalize_cell,
     normalize_column_spec,
+    normalize_max_rows,
     resolve_layout,
 )
 
@@ -121,20 +123,30 @@ def _cell(row: Sequence[str], index: Optional[int]) -> str:
     return str(row[index]).strip()
 
 
-def build_records(rows: Sequence[Sequence[str]], column: Optional[str] = "trigger") -> List[CharacterRecord]:
-    """把 CSV 行解析成角色记录列表。
+def build_records(rows: Iterable[Sequence[str]], column: Optional[str] = "trigger") -> List[CharacterRecord]:
+    """把 CSV 行**单次遍历**解析成角色记录列表。
 
     参数:
+        rows: 行**迭代器或序列**（``csv.reader`` 即可，无需预先读入内存）
         column: 名字来源列，``auto`` / ``all`` / 列序号 / 列名（默认 ``trigger``）。
                 ``all`` 对角色节点没有意义，会直接报错。
 
     行内保持原始顺序（源文件已按 count 降序），空行与名字为空的行会被跳过。
+
+    **为什么必须单次遍历**（改造记录）：本函数此前是 ``Sequence`` 签名并**两次遍历**
+    ``rows``——第一遍只为了找表头行，第二遍才真正解析。传列表时看不出问题，但传
+    一次性生成器时会**静默丢数据**：第一遍把迭代器消费到表头为止，第二遍在剩余
+    迭代器上重新 ``enumerate`` 从 0 开始，于是 ``position < start`` 把第一条数据行
+    当成「表头之前的行」跳掉。实测 6 行（1 表头 + 5 数据）只得到 4 条记录，**不抛
+    异常、不打日志**——是最难发现的失败模式。现在改为「先探测首行，再用
+    ``chain((first,), iterator)`` 回填」的单次遍历，签名同时放宽为 ``Iterable``。
     """
+    iterator = iter(rows)
+
     first: Optional[Sequence[str]] = None
-    header_position = 0
-    for position, row in enumerate(rows):
+    for row in iterator:
         if row and any(str(cell or "").strip() for cell in row):
-            first, header_position = row, position
+            first = row
             break
     if first is None:
         return []
@@ -151,12 +163,11 @@ def build_records(rows: Sequence[Sequence[str]], column: Optional[str] = "trigge
     has_header = is_header_row(first) or (_spec_is_name(spec) and spec in cells)
     name_index = int(resolve_layout(first, spec, has_header))
     aux = _locate(cells) if has_header else {}
-    start = header_position + 1 if has_header else 0
 
     records: List[CharacterRecord] = []
-    for position, row in enumerate(rows):
-        if position < start:
-            continue
+    # 首行不是表头时它本身就是数据行，需要一并处理（与 parse_artist_rows 同一手法）
+    body = iterator if has_header else chain((first,), iterator)
+    for row in body:
         if not row or not any(str(cell or "").strip() for cell in row):
             continue
         if name_index >= len(row):
@@ -296,35 +307,59 @@ def build_payload(records: Sequence[CharacterRecord], top_names: Optional[Set[st
 # ----------------------------------------------------------------------
 # 解析 34,416 行需要构造三万多条记录，按「文件签名 + 列」缓存，
 # 多个节点实例共享，避免每次执行都重解析。
-_RECORDS_CACHE: "OrderedDict[Tuple[str, str, int, int], List[CharacterRecord]]" = OrderedDict()
+_RECORDS_CACHE: "OrderedDict[Tuple[str, str, int, int, int], List[CharacterRecord]]" = OrderedDict()
 _RECORDS_LOCK = threading.RLock()
 _MAX_RECORDS_CACHE = 4
 
 
 def load_records(
-    repository: ArtistRepository, custom_path: Optional[str] = None, column: Optional[str] = "trigger"
+    repository: ArtistRepository,
+    custom_path: Optional[str] = None,
+    column: Optional[str] = "trigger",
+    max_rows: Optional[int] = None,
 ) -> List[CharacterRecord]:
-    """读取并缓存角色记录（内容未变化时直接命中缓存）。"""
-    rows, stat = repository.load_rows(custom_path)
-    if stat is None:
-        return build_records(rows, column)
+    """读取并缓存角色记录（内容未变化时直接命中缓存）。
 
-    key = (stat[0], normalize_column_spec(column), stat[1], stat[2])
-    with _RECORDS_LOCK:
-        cached = _RECORDS_CACHE.get(key)
-        if cached is not None:
-            _RECORDS_CACHE.move_to_end(key)
-            return cached
+    **走流式入口**（:meth:`ArtistRepository.open_rows`）而不是 ``load_rows``：
+    改造前这里调用 ``repository.load_rows()``，它会把整份原始行列表写进
+    ``_rows_cache`` 并常驻——角色节点因此同时持有「原始行 + records + names +
+    record_map」四份结构。现在解析器直接消费行迭代器，records 建好后原始行即被
+    丢弃，只缓存 records 本身（AC-C06）。
 
-    records = build_records(rows, column)
+    **有效上限进缓存键**（AC-C05）：键含 ``max_rows``，改上限必然重建。
 
-    if records:
+    错误语义与改造前一致：读取期任一解码 / CSV / IO 错误则返回空结果且**不写缓存**
+    （空结果常来自瞬时 IO 失败，缓存它会让文件恢复后仍返回空）。
+    """
+    limit = normalize_max_rows(max_rows)
+    rows, state, stat = repository.open_rows(custom_path, max_rows=limit)
+    try:
+        if stat is None:
+            return build_records(rows, column)
+
+        key = (stat[0], normalize_column_spec(column), stat[1], stat[2], limit if limit is not None else 0)
         with _RECORDS_LOCK:
-            _RECORDS_CACHE[key] = records
-            _RECORDS_CACHE.move_to_end(key)
-            while len(_RECORDS_CACHE) > _MAX_RECORDS_CACHE:
-                _RECORDS_CACHE.popitem(last=False)
-    return records
+            cached = _RECORDS_CACHE.get(key)
+            if cached is not None:
+                _RECORDS_CACHE.move_to_end(key)
+                return cached
+
+        records = build_records(rows, column)
+        if state["failed"]:
+            return []
+
+        if records:
+            with _RECORDS_LOCK:
+                _RECORDS_CACHE[key] = records
+                _RECORDS_CACHE.move_to_end(key)
+                while len(_RECORDS_CACHE) > _MAX_RECORDS_CACHE:
+                    _RECORDS_CACHE.popitem(last=False)
+        return records
+    finally:
+        # 无论命中缓存、解析完成还是中途异常，都要关掉文件句柄
+        close = getattr(rows, "close", None)
+        if close is not None:
+            close()
 
 
 def clear_records_cache() -> None:
@@ -393,29 +428,50 @@ class CharacterIndex:
         return self._copyrights
 
 
-_INDEX_CACHE: "OrderedDict[Tuple[str, str, int, int], CharacterIndex]" = OrderedDict()
+_INDEX_CACHE: "OrderedDict[Tuple[str, str, int, int, int], CharacterIndex]" = OrderedDict()
 
 
 def load_index(
-    repository: ArtistRepository, custom_path: Optional[str] = None, column: Optional[str] = "trigger"
+    repository: ArtistRepository,
+    custom_path: Optional[str] = None,
+    column: Optional[str] = "trigger",
+    max_rows: Optional[int] = None,
 ) -> CharacterIndex:
     """读取记录并返回派生索引（与 :func:`load_records` 共用同一套文件签名缓存）。
 
     返回的索引在 CSV 不变时被多个节点实例、多次执行共享；CSV 一变（路径 / 列 /
-    修改时间 / 大小任一不同）就重建，不会读到旧数据。
-    """
-    rows, stat = repository.load_rows(custom_path)
-    if stat is None:
-        return CharacterIndex(build_records(rows, column))
+    修改时间 / 大小 / **有效上限**任一不同）就重建，不会读到旧数据。
 
-    key = (stat[0], normalize_column_spec(column), stat[1], stat[2])
+    **不再预先调 ``load_rows``**：改造前这里先 ``repository.load_rows()`` 拿 stat
+    与原始行，再交给 :func:`load_records`——而后者又会自己 ``load_rows`` 一次
+    （虽有缓存兜底，但一旦 ``_rows_cache`` 淘汰就会二次读盘）。现在只取
+    ``stat_key`` 用于查缓存，records 由 :func:`load_records` 的流式路径产出。
+    """
+    limit = normalize_max_rows(max_rows)
+    stat = repository.stat_key(repository.resolve_path(custom_path))
+    if stat is None:
+        rows, _state, _stat = repository.open_rows(custom_path, max_rows=limit)
+        try:
+            return CharacterIndex(build_records(rows, column))
+        finally:
+            close = getattr(rows, "close", None)
+            if close is not None:
+                close()
+
+    key = (
+        stat[0],
+        normalize_column_spec(column),
+        stat[1],
+        stat[2],
+        limit if limit is not None else 0,
+    )
     with _RECORDS_LOCK:
         cached = _INDEX_CACHE.get(key)
         if cached is not None:
             _INDEX_CACHE.move_to_end(key)
             return cached
 
-    records = load_records(repository, custom_path, column)
+    records = load_records(repository, custom_path, column, max_rows=limit)
     index = CharacterIndex(records)
     if records:
         with _RECORDS_LOCK:

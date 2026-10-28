@@ -63,6 +63,7 @@ character tag,copyright tag
 | `describe_character` | BOOLEAN | Whether to append each character's fixed appearance tags (`core_tags`, i.e. the character description) to its line; on by default |
 | `custom_csv_path` | STRING | Custom character CSV path; empty uses `danbooru_character_001.csv` |
 | `tested_db_path` | STRING | Records database path; empty uses `rollingcharacter.sqlite` (separate from the artist node) |
+| CSV read limit (`csv_max_rows`) | INT | Maximum number of CSV records consumed per read (**includes the header row**; 0 = unlimited, default 0). Records beyond the limit are not loaded, so the candidate pool, copyright menu and popularity pool shrink accordingly; set a positive value when the table is large and only the first part is needed |
 
 This node performs **no weight assignment** (hence no weight parameters), **no exhaustion** (characters
 are single tags) and **has no dedup mode parameter** (repeats are avoided with a fixed-rule window, see below).
