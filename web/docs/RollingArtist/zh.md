@@ -68,6 +68,7 @@ CSV 里没有 `trigger` 列时退回首列并记 WARNING（此时可能是未转
 |---|---|---|
 | 自定义 CSV 路径（`custom_csv_path`） | STRING | 自定义艺术家 CSV 路径；留空使用节点目录下的 `danbooru_art_001.csv` |
 | 记录数据库路径（`tested_db_path`） | STRING | 记录数据库（SQLite）路径；留空使用节点目录下的 `rollingartist.sqlite`。已测记录在这个文件里，更换路径相当于重置去重进度 |
+| CSV 读取上限（`csv_max_rows`） | INT | 一次读取最多消费多少条 CSV 记录（**含表头行**；0 = 不限制，默认 0）。超过上限的记录不参与加载，候选池与 Top 池会相应变小；表很大且只想用前一部分时可设正整数以降低读取耗时与内存 |
 
 ## 生成流程
 

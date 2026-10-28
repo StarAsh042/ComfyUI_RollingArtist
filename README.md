@@ -43,6 +43,7 @@ git clone https://github.com/StarAsh042/ComfyUI_RollingArtist.git
 - `dedup_mode`（默认 `none`）：`none` 不去重（仍记录）；`full_prompt` 顺序与权重全同才算重复；`artist_set` 只看集合；`artist_list` 比较排序后名字。完整对比见 [`web/docs/RollingArtist/zh.md`](web/docs/RollingArtist/zh.md)
 - `max_attempts`（1-100，默认 10）：重试上限；仍全命中时接受最后一次并打 WARNING
 - `custom_csv_path` / `tested_db_path`：留空用默认 CSV / `rollingartist.sqlite`；**换数据库路径等于重置去重进度**
+- `csv_max_rows`（默认 0 = 不限制）：一次读取最多消费多少条 CSV 记录（**含表头行**）。超过上限的记录不参与加载，候选池与 Top 池会相应变小；表很大且只想用前一部分时设正整数，可降低读取耗时与内存。**默认 0 与旧版行为完全一致**
 
 固定读 `trigger` 列（已转义，如 `hammer_\(sunset_beach\)`）。没有该列时**回退首列**并记 WARNING；若输出里出现数字或网址（把 `count`、`url` 当成了人名），就是这种情况。
 
@@ -68,6 +69,7 @@ ganyu_\(genshin_impact\),genshin_impact,1girl,horns
 | `copyright_pick` | COMBO | 列出全部作品（默认约 3,460 个，按 count 总和降序、并列按名字升序），首项 `(不限)`；可打字筛选、忽略大小写。**下拉项来自默认 CSV**：填了 `custom_csv_path` 时下拉不会跟着变，但筛选在该 CSV 上生效——其作品名请直接填写（原始写法 `fate_(series)` 亦可）；选了个该 CSV 里没有的作品时，报错会列出该 CSV 的作品总数与热门示例 |
 | `describe_character` | BOOLEAN | 每行末尾拼上角色描述；默认开启 |
 | `custom_csv_path` / `tested_db_path` | STRING | 留空用 `danbooru_character_001.csv` / `rollingcharacter.sqlite`（与画师分开）；作品筛选在 `custom_csv_path` 指向的 CSV 上生效 |
+| `csv_max_rows` | INT | 一次读取最多消费多少条 CSV 记录（**含表头行**；默认 0 = 不限制）。超过上限的记录不参与加载，候选池、作品菜单与热度池会相应变小；**默认 0 与旧版行为完全一致** |
 
 角色节点**不做权重分配**（故无 `weight_*` / `sort_by_weight`）；输出**不接受前缀包装**（没有画师那样的 `artists_prefix` 开关）；**没有去重模式参数**，改用固定规则的窗口。
 
