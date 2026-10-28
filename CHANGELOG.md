@@ -3,6 +3,43 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+**大 CSV 防护与路径边界版本**：新增可配置的 CSV 读取上限、把两条读取路径的计数语义统一并消除原始行双份驻留；修正两处路径边界行为并新增管理员配置文件白名单。默认行为、节点契约与数据库格式全部保持兼容。
+
+### 新增
+
+- **两节点新增可选输入 `csv_max_rows`**（INT，默认 `0` = 不限制，追加在 optional 末尾并折叠在「高级输入」里）：一次读取最多消费多少条 CSV 记录（**含表头行**）。超过上限的记录不参与加载，候选池 / Top 池 / 作品菜单会相应变小；表很大且只想用前一部分时设正整数可降低读取耗时与内存。**默认 0 与旧版行为完全一致**，旧工作流无需任何操作
+- **管理员路径白名单（配置文件通道）**：节点目录下的 `ra_config.json` 可配置 `csv_allowed_roots` / `db_allowed_roots`，把自定义 CSV / DB 路径限制在指定根目录内。文件不存在 = 不启用（保持现有黑名单行为）；配置存在但无效或与 `ROLLINGARTIST_ALLOW_ANY_PATH=1` 同时生效时 fail closed。白名单只收窄不放宽——通过后仍须通过系统目录、凭据、源码与 UNC 防护
+- **`ra_core.artists` 新增 `normalize_max_rows()` / `resolve_max_rows()`**：上限的唯一校验入口，只接受 `None` 或正整数，`0`/负数/非整数一律报配置错误而不是静默退回无限
+
+### 变更
+
+- **CSV 读取改为流式消费**：画师路径不再先把整份 CSV 读成 `List[List[str]]` 再解析（改造前冷加载时「原始行列表 + 艺术家列表」两份结构同时驻留）；角色路径改走新增的 `ArtistRepository.open_rows()`，原始行用完即弃，**不再常驻 `_rows_cache`**（改造前角色同时持有原始行 + records + names + record_map 四份）。`load_rows` 保留为公开兼容入口
+- **`build_records` 改为单次遍历**（`Sequence` → `Iterable`）：改造前它两次遍历输入行，喂一次性生成器时会**静默丢掉第一条数据行**（实测 6 行只得到 4 条记录，不抛异常也不打日志）。现在先探测首行再用 `chain` 回填，列表与生成器输入结果完全一致
+- **两条读取路径统一计数基准**：改造前 `load()` 与 `load_rows()` 对「表头是否计入」「空记录是否计入」的处理互相冲突，同一文件同一 N 会返回不同条数。现在统一为「`csv.reader` 产出的记录，含表头、含空记录」，两条路径共用一份实现
+- **上限进入全部 5 层缓存键**：改造前缓存键只有文件签名，改上限会命中旧缓存（实测「上限 3→6」时 artists / rows / records / index / 作品菜单全部 stale，且 `_rows_cache` 命中还会掩盖下层失效）。现在有效上限参与每一层键
+
+### 修复
+
+- **exact-N 不再谎称已截断**：改造前用 `len(rows) >= 上限` 判断，文件恰好 N 条记录时也打「已截断」告警。现在只有确实还有记录未被消费时才告警，且**不额外读盘**（由流式实现碰到第 N+1 条时置位）
+- **非本机管理共享不再被还原成本地盘符**：`\\evil-host\D$\data\x.csv` 这类写法改造前会被映射成 `D:\data\x.csv` 并**放行**（实际访问的是本机同名路径，远程意图被静默降级）。现在只有 `localhost` / `127.0.0.1` / `[::1]` 会被还原，其他主机保持 UNC 并被拒绝
+- **路径嵌套判断统一大小写**：`_is_within` 的 `commonpath` 结果与 root 比较时未做 `normcase`，混合大小写会误判。改造前在现有黑名单链路下不可达（`realpath` 已统一已存在目录的大小写），但白名单根目录尚不存在时会**误拒**合法路径。现已统一
+- **发布卫生测试补上环境变量读取规则**：`SCAN_RULES` 此前缺少「环境变量读取」这条模式（`os` 模块的 `getenv` 调用），导致 Registry 上 5.1.7 唯一的一条 finding（`python_environment_manipulation`）在本地扫描中完全不可见——门禁全绿却一路 Flagged 的原因之一。现补上该规则 + 自检用例 + ALLOWLIST 有效性用例（现有 5 处按已知 info 级误报登记，v5.2.0 不新增同类读取）
+
+### 工程
+
+- **README / BENCHMARKS / web docs / locales 同步**：新增参数写入参数表与帮助页，zh/en 语言包补齐（代码默认 tooltip 与 `locales/zh` 保持逐字一致）
+- **测试规模口径更新**：README 原写「254 个测试函数 / 338 个展开用例」，实测已漂移；本版按实际收集数重新记录
+- **`.gitignore` 补齐构建产物**：`*.egg-info/`、`build/`、`.pytest_cache/`、`.ruff_cache/`、`.mypy_cache/`——`pip install -e ".[dev]"` 会生成未被忽略的 `ComfyUI_RollingArtist.egg-info/`，本地执行会弄脏工作树
+
+### 兼容性
+
+- 节点契约：仅**追加**可选输入，形参与 `INPUT_TYPES` 的末尾位置一致；节点名、`CATEGORY`、`RETURN_TYPES`、`RETURN_NAMES` 无变化
+- 前端：ComfyUI 1.55.18 默认按**位置**恢复 `widgets_values`（`Comfy.Workflow.NamedValuesRestore` 默认关闭），因此新输入必须追加在末尾——旧工作流取不到最后一个值时会回落到默认 `0`，不会错位
+- 数据库：无 schema 变更、无记录格式迁移
+- 已知限制不变：本版**不承诺**解决 TOCTOU（路径校验与 SQLite 连接之间仍按路径重开）；白名单是静态边界收紧，不是沙箱
+
 ## [5.1.7] - 2026-10-25
 
 **扫描触发点三轮消除版本（文档类根治）**：CHANGELOG.md 排除出发布包 + 历史段落 API 字面量改写 + 发布卫生测试覆盖扩展到全部文本文件，无功能变化、无行为变化。
