@@ -49,7 +49,7 @@ import json
 import os
 import re
 import threading
-from typing import Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
 
 from .constants import LOGGER, NODE_DIR
 
@@ -179,9 +179,13 @@ def _read_registry_string(key_path: str, value_name: str) -> Optional[str]:
     except ImportError:
         return None
 
+    # ``winreg`` 是 Windows 专用模块：在 Linux/macOS 上 mypy 找不到它的成员，
+    # 直接调用会报 attr-defined。绑定到 Any 让两个平台的类型检查都成立。
+    winreg_api: Any = winreg
+
     try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
-            value, _kind = winreg.QueryValueEx(key, value_name)
+        with winreg_api.OpenKey(winreg_api.HKEY_LOCAL_MACHINE, key_path) as key:
+            value, _kind = winreg_api.QueryValueEx(key, value_name)
     except OSError:
         return None
 
