@@ -96,7 +96,15 @@ ganyu_\(genshin_impact\),genshin_impact,1girl,horns
 
 **已知限制**：这是**纵深防御**，不是沙箱，**不能替代访问控制**——暴露到公网且无鉴权时仍可读取未列入名单的普通文件；不解决 TOCTOU；盘符黑名单只覆盖本机盘符。**若 ComfyUI 对局域网或公网开放，请加访问控制**。
 
-**逃生开关**：单机自用可设 `ROLLINGARTIST_ALLOW_ANY_PATH=1` 完全关闭防护——**仅在确认环境可信时使用**。同一记录数据库**不要**被多个实例共用同一个网络盘（WAL 要求本地文件系统）。
+**管理员白名单（只收窄）**：节点目录下放 `ra_config.json` 可把自定义 CSV / DB 路径限制在指定根目录内：
+
+```json
+{"csv_allowed_roots": ["D:\\datasets"], "db_allowed_roots": ["D:\\datasets"]}
+```
+
+文件不存在 = 不启用（保持黑名单行为）；配置存在但无效时 fail closed。白名单**只收窄不放宽**——通过后仍须过系统目录、凭据、源码与 UNC 防护。系统目录（`SystemRoot` / `Program Files` / `ProgramData`）从注册表读取，`Program Files` 被挪到其它盘也能正确拦截。
+
+**没有「关闭防护」的开关**（5.3.0 起）：旧版的 `ROLLINGARTIST_ALLOW_ANY_PATH=1` 已**删除**。它能一键关停全部路径防护，等于任何能写进程环境的人都能让防护失效。需要更强约束的部署方请用上面的 `ra_config.json` 白名单；少数把 CSV / 数据库放在系统目录下的场景请换目录。同一记录数据库**不要**被多个实例共用同一个网络盘（WAL 要求本地文件系统）。
 
 ## 使用示例
 
