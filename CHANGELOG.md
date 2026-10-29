@@ -3,7 +3,7 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [5.3.0] - 2026-10-29
 
 **消除 Registry 扫描触发点版本**：删除唯一的「关闭路径防护」环境变量开关，Windows 系统目录改从注册表读取，使发布包内的安全扫描 finding 归零。**含一处破坏性变更**：`ROLLINGARTIST_ALLOW_ANY_PATH` 失效。
 
