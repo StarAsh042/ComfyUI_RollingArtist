@@ -3,6 +3,32 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+**消除 Registry 扫描触发点版本**：删除唯一的「关闭路径防护」环境变量开关，Windows 系统目录改从注册表读取，使发布包内的安全扫描 finding 归零。**含一处破坏性变更**：`ROLLINGARTIST_ALLOW_ANY_PATH` 失效。
+
+### 破坏性变更
+
+- **删除逃生开关 `ROLLINGARTIST_ALLOW_ANY_PATH`**：该环境变量曾用于完全关闭路径防护。它能一键关停全部检查（系统目录、凭据目录、源码、UNC），等于任何能写进程环境的人都能让防护失效——与「防任意文件读写」的初衷相悖，且是 Registry 安全扫描唯一 finding 的来源。**升级后该变量不再有任何效果**；依赖它把 CSV / 数据库放在系统目录或凭据目录下的用户会收到 `PathNotAllowedError`，请换目录，或改用 `ra_config.json` 白名单（白名单只收窄，不能放开系统目录）。同时删除 `ra_core.paths.is_path_guard_disabled()` 与其导出
+- 拒绝文案不再提示「可设置环境变量关闭防护」，改为提示用 `ra_config.json` 白名单
+
+### 变更
+
+- **Windows 系统目录改读注册表**：`SystemRoot` / `Program Files` / `Program Files (x86)` / `ProgramData` 不再从环境变量读取，改为读 `HKLM` 注册表（`ProgramData` 走 `Explorer\Shell Folders` 的 `Common AppData`）。注册表是这些值的**权威来源**（环境变量是登录时派生的副本，可被启动脚本改写），因此**防护能力不降级反而更准**：`Program Files` 被挪到 `D:\Program Files` 时也能正确拦截。注册表读不到时回退标准默认值，候选集取「默认值 ∪ 注册表值」并由存在性过滤
+- `winreg` 延迟导入，POSIX 上模块仍可独立导入与测试
+
+### 新增
+
+- **`tests/test_registry_scan_replica.py`**：本地复刻 Registry 安全扫描规则（规则字面量由 Registry 实际回报的 `metadata.matched_patterns` 反推），在**发布前**回答「这次改动会不会新增 finding」。5.1.3 与 5.1.6 两轮「消除误报」都只是把 `os.environ.get(` 换成 `os.getenv(`，从一个规则换到另一个规则，instances 反而 1→5；有了这个复刻器，同类盲改不会再发生
+
+### 修复
+
+- **发布卫生豁免清零**：`tests/test_publish_hygiene.py` 的 `ALLOWLIST` 与 `ALLOWLIST_EXPECTED_HITS` 清空（v5.2.0 曾登记 1 条 `("ra_core/paths.py", "PEM-$env_read3")` 豁免）。保持为空是 Registry Active 的前提
+
+### 兼容性
+
+节点输入输出、默认行为、CSV 格式、数据库 schema 与 v5.2.0 **完全一致**；唯一差异是上述被删除的环境变量。旧工作流无需任何操作。
+
 ## [5.2.0] - 2026-10-28
 
 **大 CSV 防护与路径边界版本**：新增可配置的 CSV 读取上限、把两条读取路径的计数语义统一并消除原始行双份驻留；修正两处路径边界行为并新增管理员配置文件白名单。默认行为、节点契约与数据库格式全部保持兼容。
