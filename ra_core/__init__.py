@@ -62,7 +62,6 @@ from .paths import (
     check_db_path,
     check_path,
     forbidden_roots,
-    is_path_guard_disabled,
 )
 from .startup import cleanup_default_runtime_files, default_runtime_files
 from .storage import backup_file, file_fingerprint, parse_tested_row, read_rows
@@ -137,7 +136,6 @@ __all__ = [
     "check_db_path",
     "check_path",
     "forbidden_roots",
-    "is_path_guard_disabled",
     "backup_file",
     "file_fingerprint",
     "parse_tested_row",

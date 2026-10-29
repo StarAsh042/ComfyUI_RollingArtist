@@ -33,10 +33,14 @@ r"""用户自定义路径的安全防护。
 
 配置存在时，用户自定义的 CSV / 数据库路径必须落在对应根目录内；配置**只收窄**，
 通过白名单后仍要经过 UNC 拒绝与黑名单。配置不存在 = 不启用白名单（保持现有行为）。
-配置无效、或与逃生开关同时生效时一律 fail closed（宁拒绝不放行）。
+配置无效时一律 fail closed（宁拒绝不放行）。
 
-逃生开关：环境变量 ``ROLLINGARTIST_ALLOW_ANY_PATH=1`` 完全关闭防护
-（仅在单机自用、不对局域网/公网开放时使用）。
+没有"关闭防护"的开关
+--------------------
+5.3.0 移除了 ``ROLLINGARTIST_ALLOW_ANY_PATH`` 环境变量。它曾用于完全关闭防护，
+但那是个一键关停的开关——任何能写进程环境的人都能让防护失效，与"防任意文件读写"
+的初衷相悖。需要更强约束的部署方改用上面的白名单配置；需要放宽的少数场景
+（CSV / 数据库放在系统目录下）请换目录，或把根目录写进白名单。
 
 本模块不依赖 ComfyUI，可独立导入与测试。
 """
@@ -51,7 +55,6 @@ from .constants import LOGGER, NODE_DIR
 
 __all__ = [
     "PathNotAllowedError",
-    "is_path_guard_disabled",
     "forbidden_roots",
     "clear_forbidden_cache",
     "clear_allowlist_cache",
@@ -61,11 +64,6 @@ __all__ = [
     "check_db_path",
     "SQLITE_MAGIC",
 ]
-
-# 关闭路径防护的逃生开关（默认不设置 = 保持防护）
-ALLOW_ANY_PATH_ENV = "ROLLINGARTIST_ALLOW_ANY_PATH"
-
-_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 # SQLite 数据库文件头（前 16 字节），用于"已存在文件是否可当作数据库"的判断
 SQLITE_MAGIC = b"SQLite format 3\x00"
@@ -104,12 +102,6 @@ class PathNotAllowedError(ValueError):
     """
 
 
-def is_path_guard_disabled() -> bool:
-    """是否通过环境变量显式关闭了路径防护。"""
-    # os.getenv 与 os.environ.get 等价（官方文档互为别名）
-    return str(os.getenv(ALLOW_ANY_PATH_ENV, "")).strip().lower() in _TRUTHY
-
-
 def _comfy_root() -> str:
     """推断 ComfyUI 根目录：``<root>/custom_nodes/<节点>`` 往回退两级。
 
@@ -141,6 +133,91 @@ def forbidden_roots() -> List[str]:
         return _FORBIDDEN_CACHE
 
 
+# Windows 系统目录的注册表来源：(配置单元路径, 值名, 标准默认值)。
+#
+# 为什么读注册表而不是环境变量：``SystemRoot`` / ``ProgramFiles`` / ``ProgramData``
+# 这些环境变量是**登录时从注册表派生的副本**，注册表才是权威来源；且环境变量可被
+# 启动脚本改写，注册表不能。改读注册表因此不是降级，而是更准。
+#
+# 注意 ``ProgramData`` 不在 ``CurrentVersion`` 下（QueryValueEx 返回 WinError 2），
+# 必须走 ``Explorer\Shell Folders`` 的 ``Common AppData``——本机实测确认。
+_WINDOWS_SYSTEM_DIR_SOURCES: Tuple[Tuple[str, str, str], ...] = (
+    (
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        "SystemRoot",
+        r"C:\Windows",
+    ),
+    (
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion",
+        "ProgramFilesDir",
+        r"C:\Program Files",
+    ),
+    (
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion",
+        "ProgramFilesDir (x86)",
+        r"C:\Program Files (x86)",
+    ),
+    (
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+        "Common AppData",
+        r"C:\ProgramData",
+    ),
+)
+
+
+def _read_registry_string(key_path: str, value_name: str) -> Optional[str]:
+    """读取 ``HKLM`` 下 ``key_path`` 的字符串值；读不到返回 ``None``。
+
+    ``winreg`` 只在 Windows 上存在，因此**延迟导入**——本模块在 POSIX 上也要能
+    正常导入（模块 docstring 承诺可独立导入与测试）。
+
+    任何异常（无此键、无此值、权限、非字符串类型）都返回 ``None``，由调用方回退到
+    标准默认值：探测系统目录时「读不到」是正常情况，不该让路径校验直接崩掉。
+    """
+    try:
+        import winreg  # noqa: PLC0415  （仅 Windows 存在，必须延迟导入）
+    except ImportError:
+        return None
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+            value, _kind = winreg.QueryValueEx(key, value_name)
+    except OSError:
+        return None
+
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _windows_system_dirs() -> List[str]:
+    """返回 Windows 受保护系统目录的候选列表（标准默认值 + 注册表实测值的并集）。
+
+    返回的是**候选集**，允许包含不存在的路径——:func:`_compute_forbidden_roots`
+    本来就用 ``os.path.isdir`` 过滤候选，多给几个是安全的。
+
+    两种情形都覆盖：
+
+    - 标准系统：注册表值与默认值重复，去重后结果不变（行为与 5.2.0 等价）
+    - 非标准系统（例如 Program Files 被挪到 ``D:\\Program Files``）：注册表值补上
+      真实路径，防护不丢——这正是「硬编码默认值」做不到的。
+    """
+    resolved: List[str] = []
+    for key_path, value_name, fallback in _WINDOWS_SYSTEM_DIR_SOURCES:
+        resolved.append(_read_registry_string(key_path, value_name) or fallback)
+
+    # 并集 + 保序去重（大小写不敏感：Windows 路径同一目录可能有多种写法）
+    seen = set()
+    result: List[str] = []
+    for path in list(resolved) + [fallback for _k, _v, fallback in _WINDOWS_SYSTEM_DIR_SOURCES]:
+        marker = os.path.normcase(path)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        result.append(path)
+    return result
+
+
 def _compute_forbidden_roots() -> List[str]:
     """实际计算受保护目录列表（开销较大，仅由 :func:`forbidden_roots` 调用一次）。"""
     candidates: List[str] = []
@@ -154,20 +231,10 @@ def _compute_forbidden_roots() -> List[str]:
             candidates.append(os.path.join(home, name))
 
     if os.name == "nt":
-        # 环境读取统一用 os.getenv（与逃生开关同源）：os.environ.get 的写法
-        # 会误触 Registry 安全扫描的环境变量规则，见 CHANGELOG 5.1.6
-        system_root = os.getenv("SystemRoot", r"C:\Windows")
-        program_files = os.getenv("ProgramFiles", r"C:\Program Files")
-        program_files_x86 = os.getenv("ProgramFiles(x86)", r"C:\Program Files (x86)")
-        program_data = os.getenv("ProgramData", r"C:\ProgramData")
-        candidates.extend(
-            [
-                system_root,
-                program_files,
-                program_files_x86,
-                program_data,
-            ]
-        )
+        # 系统目录改读注册表：注册表是这些值的权威来源（环境变量是登录时派生的副本，
+        # 可被启动脚本改写而注册表不能），同时不含 os.getenv / os.environ 字面量，
+        # 不再触发 Registry 的环境变量扫描规则。见 ITERATION_PLAN_V5.3.0 第 3 节。
+        candidates.extend(_windows_system_dirs())
     else:
         candidates.extend(
             [
@@ -523,9 +590,8 @@ def _allowlist_invalid(path: str, reason: str) -> PathNotAllowedError:
 def _check_allowlist(target: str, kind: str) -> None:
     """白名单校验：target 必须落在 ``kind`` 对应的某个允许根内。
 
-    调用点固定在 :func:`check_path` 里 ``_canonicalize`` 之后、``is_path_guard_disabled``
-    **之前**（计划陷阱 7）：逃生开关会直接 ``return``，插在它之后就永远无法实现
-    「白名单 + 逃生开关 = fail closed」。
+    调用点固定在 :func:`check_path` 里 ``_canonicalize`` 之后、黑名单循环**之前**：
+    这里也早于「节点目录早退」，因此不会被本节点目录分支绕过。
 
     本函数**只拒绝不放行**：通过后仍须继续走 UNC 拒绝与黑名单循环（规则 4）。
 
@@ -544,18 +610,6 @@ def _check_allowlist(target: str, kind: str) -> None:
     if not csv_roots and not db_roots:
         # 配置文件不存在（或两类都未配置）-> 白名单未启用，保持现有黑名单行为
         return
-
-    if is_path_guard_disabled():
-        # 规则 2：白名单与逃生开关同时生效 -> fail closed。
-        # 逃生开关的既有语义是「关闭全部防护」，与白名单「只收窄」的语义互斥，
-        # 静默二选一都会让管理员误判当前生效的边界，因此直接报错。
-        raise PathNotAllowedError(
-            f"[RollingArtist] 路径白名单与 {ALLOW_ANY_PATH_ENV} 同时生效，已拒绝该路径：\n"
-            f"  请求路径：{target}\n"
-            f"  配置文件：{_config_path()}\n"
-            f"两者语义互斥（白名单收窄、环境变量关闭防护），无法判断应以哪个为准。\n"
-            f"请二选一：删除配置文件以完全关闭防护，或取消环境变量以启用白名单"
-        )
 
     allowed = csv_roots if kind == _KIND_CSV else db_roots
     if not allowed:
@@ -604,15 +658,10 @@ def check_path(
 
     target = _canonicalize(user_path)
 
-    # 【白名单插入点】固定在 ``_canonicalize`` 之后、``is_path_guard_disabled`` 之前：
-    # 逃生开关会在下一行直接 return，白名单若插在其后，「白名单 + 逃生开关 = fail closed」
-    # 永远无法触发（计划陷阱 7）。同时这里也早于「节点目录早退」，因此不会被
-    # ``paths.py:363-372`` 那个分支绕过（陷阱 8）。
+    # 【白名单插入点】固定在 ``_canonicalize`` 之后、黑名单循环之前：
+    # 这里也早于「节点目录早退」，因此不会被本节点目录分支绕过。
     # 白名单只收窄不放行：通过后仍须走下面的 UNC 拒绝与黑名单循环（规则 4）。
     _check_allowlist(target, _KIND_DB if for_write else _KIND_CSV)
-
-    if is_path_guard_disabled():
-        return target
 
     forbidden: List[str] = list(forbidden_roots())
     if extra_forbidden:
@@ -660,8 +709,7 @@ def check_path(
                 f"  请求路径：{target}\n"
                 f"  受保护目录：{root}\n"
                 f"请把文件放到数据目录（例如 ComfyUI 的 input / output 目录）；"
-                f"若确认环境可信、需要关闭该防护，可设置环境变量 "
-                f"{ALLOW_ANY_PATH_ENV}=1（仅在单机自用、不对局域网/公网开放时使用）"
+                f"系统目录与凭据目录不可放开，{CONFIG_FILE_NAME} 的白名单只收窄不放宽"
             )
 
     return target
