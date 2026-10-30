@@ -3,6 +3,30 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+**清理版本**：删除已无调用方的死代码与失效注释，无运行时行为变化、无节点契约变化、无数据库格式变化。
+
+### 变更
+
+- **删除 `ra_core.storage` 的两个无调用方函数**：`read_rows()`（旧版 CSV 全量读取，4.0.0 记录改存 SQLite 后仅剩 `ra_core.__init__` 的 re-export）与 `backup_file()`（导入后把旧 CSV 改名留底，全仓库零调用方）。模块现只保留 `ensure_parent_dir()` / `file_fingerprint()` / `parse_tested_row()` 三件仍在使用的功能
+- **删除两个无引用常量**：`CSV_WRITE_ENCODING`（本模块刻意不再提供 CSV 写入能力，写入只有数据库一个入口）与 `LEGACY_BACKUP_SUFFIX`（只服务于已删除的 `backup_file()`）
+- **删除 `ra_core.db._read_schema_version()`**：`_read_raw_schema_version()` 的薄封装，未记录时把 `None` 折成 1，仅测试使用。需要「未记录」与「已记录」区分的调用方直接用 `_read_raw_schema_version()`
+- **`ra_core` 包的导出面同步收缩**：`__all__` 去掉 `read_rows` / `backup_file` / `LEGACY_BACKUP_SUFFIX`。若外部脚本曾从 `ra_core` 顶层导入这三者，请改为直接读 `ra_core.storage` / `ra_core.constants` 中的等价能力（`read_rows` 可由 `parse_tested_row` 配合标准库 `csv` 复现）
+- **删除 `RollingArtist.py` 的死别名 `_as_text`**：它只被 `_text = _as_text` 一行使用，现直接写 `_text = as_text`；`_as_int` / `_as_float` / `_as_bool` 均有实际使用，保留
+
+### 文档
+
+- **清除源码注释中的内部工单号**：`ra_core/artists.py`、`ra_core/characters.py`、`ra_core/paths.py` 注释里的 `AC-C04` / `AC-C05` / `AC-C06` / `D-01` / `D-04` / `D-05` 全部去掉，只留行为说明——这些编号指向不进仓库的本地迭代文档，对外部读者是无效引用
+- **清除指向未跟踪文件的死引用**：`ra_core/paths.py` 的「见 ITERATION_PLAN_V5.3.0 第 3 节」、`ra_core/db.py` 的「见 CHANGELOG 5.1.6」（CHANGELOG 已排除出发布包）、`BENCHMARKS.md` 的「见本地迭代计划 T-11」
+- **修正 `ra_core/startup.py` 的版本归属**：「兼容从 3.2.x 升级上来的残留文件」——仓库自 v1.0.0 起就没有 3.2.x 这条版本线，旧 CSV 记录是 4.0.0 改存 SQLite 之前的格式，注释改为按记录格式描述
+- **修正 `RollingArtist.py` 的 `INPUT_TYPES` 分组说明**：「高级（CSV 数据源、数据库与旧记录路径）」——该节点已无「旧记录路径」输入，改为「CSV 数据源、数据库与读取上限」
+
+### 工程
+
+- `tests/test_db_migration.py` 随 `_read_schema_version` 删除同步调整：`test_read_schema_version_defaults_to_one_without_record` 改为 `test_read_raw_schema_version_returns_none_without_record`，直接断言原始读取在无记录时返回 `None`
+- 门禁：`pytest` 405 passed、`ruff check` 全绿、`ruff format --check` 无改动、`vulture --min-confidence 80` 仅剩 ComfyUI 契约噪音（`cls` / `kwargs`）
+
 ## [5.3.0] - 2026-10-29
 
 **消除 Registry 扫描触发点版本**：删除唯一的「关闭路径防护」环境变量开关，Windows 系统目录改从注册表读取，使发布包内的安全扫描 finding 归零。**含一处破坏性变更**：`ROLLINGARTIST_ALLOW_ANY_PATH` 失效。

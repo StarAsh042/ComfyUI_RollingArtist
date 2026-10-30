@@ -237,7 +237,7 @@ def _compute_forbidden_roots() -> List[str]:
     if os.name == "nt":
         # 系统目录改读注册表：注册表是这些值的权威来源（环境变量是登录时派生的副本，
         # 可被启动脚本改写而注册表不能），同时不含 os.getenv / os.environ 字面量，
-        # 不再触发 Registry 的环境变量扫描规则。见 ITERATION_PLAN_V5.3.0 第 3 节。
+        # 不会触发 Registry 的环境变量扫描规则。
         candidates.extend(_windows_system_dirs())
     else:
         candidates.extend(
@@ -373,7 +373,7 @@ def _strip_ads(text: str) -> str:
     return text[: 2 + index] if text[1:2] == ":" else text[:index]
 
 
-# D-05 决策（用户已拍板）：管理共享**只**还原这些本机主机形态。
+# 管理共享**只**还原这些本机主机形态。
 # 其它主机（``127.0.0.2``、``localhost.``、本机名、FQDN、任意 IP）一律保持 UNC，
 # 交由 ``check_path`` 的 UNC 拒绝分支处理——而不是被静默降级成本机同名盘符路径。
 # 主机名在 Windows 上大小写不敏感，因此匹配时用 re.IGNORECASE。
@@ -439,7 +439,7 @@ def _canonicalize(user_path: str) -> str:
 
 
 # ----------------------------------------------------------------------
-# 管理员白名单（配置文件通道，D-01 = A：不新增任何环境变量读取）
+# 管理员白名单（配置文件通道，不新增任何环境变量读取）
 # ----------------------------------------------------------------------
 # 配置文件放在节点目录下（与 ra_core/ 同级，随节点分发但默认不存在）。
 CONFIG_FILE_NAME = "ra_config.json"
