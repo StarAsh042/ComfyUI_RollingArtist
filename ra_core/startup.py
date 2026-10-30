@@ -9,7 +9,7 @@ ComfyUI 在导入任何自定义节点之前，会执行 ``custom_nodes/<节点>
 - 默认数据库 ``rollingartist.sqlite`` 与 ``rollingcharacter.sqlite``
   （各含 WAL 模式的 ``-wal`` / ``-shm`` 附带文件）
 - 旧版 CSV 记录 ``tested_combinations.csv`` 与 ``tested_combinations_remaining.csv``
-  （兼容从 3.2.x 升级上来的残留文件）
+  （记录改存 SQLite 之前的旧格式，升级后不再被读取，仅作残留清理）
 
 用户显式指定的数据库路径 / 旧记录路径一律不动，那代表用户主动选择要跨会话保留的数据。
 """
