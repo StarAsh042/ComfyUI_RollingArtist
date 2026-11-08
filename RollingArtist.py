@@ -314,33 +314,49 @@ class RollingArtist:
     def __init__(self) -> None:
         """初始化节点实例：准备好仓库与状态容器。
 
-        注意：真正的加载发生在 ``generate_artists`` 中（按文件签名缓存），
-        这里只做一次默认 CSV 的预热，且任何异常都不会影响节点注册。
+        构造期不读取任何 CSV：列表在 ``generate_artists`` 中按需加载
+        （按文件签名缓存），自定义 CSV 场景因此省掉一次默认表的冷加载。
+        兼容接口（top_pool 等）首次访问时才惰性加载默认数据。
         """
         self._repo: ArtistRepository = get_artist_repository()
         self._lock = threading.RLock()
         self.artists: List[str] = []
         self.top_count = 0
-        try:
-            # 文件签名缓存由 ArtistRepository 统一维护，实例不再保存签名
-            self.artists, _ = self._repo.load("", "trigger")
-            self.top_count = compute_top_count(len(self.artists), 0.01)
-        except Exception as error:  # pragma: no cover - 初始化必须保持健壮
-            LOGGER.error("[RollingArtist] 初始化加载默认 CSV 失败: %s", error)
+        # 构造期不读表；默认数据只在兼容接口首次访问时惰性加载一次
+        self._artists_loaded = False
 
     # ------------------------------------------------------------------
     # 兼容接口（旧版本曾暴露的方法，保留以避免破坏外部调用）
     # ------------------------------------------------------------------
+    def _ensure_default_artists(self) -> None:
+        """兼容接口首次访问时惰性加载默认 CSV（构造期不读表）。
+
+        旧版构造即暴露 ``artists`` / ``top_count``，这里保留该语义但不拖慢节点创建；
+        加载失败只记日志，保持空列表，绝不影响节点注册。
+        """
+        with self._lock:
+            if self._artists_loaded:
+                return
+            self._artists_loaded = True  # 先置位：加载失败也不反复重试
+            try:
+                artists, _ = self._repo.load("", "trigger")
+                self.artists = artists
+                self.top_count = compute_top_count(len(self.artists), 0.01)
+            except Exception as error:  # pragma: no cover - 兼容接口必须保持健壮
+                LOGGER.error("[RollingArtist] 惰性加载默认 CSV 失败: %s", error)
+
     @property
     def top_pool(self) -> List[str]:
         """Top 艺术家列表（按当前 Top 数量惰性切片）。"""
         with self._lock:
+            self._ensure_default_artists()
             return self.artists[: self.top_count]
 
     @property
     def non_top_pool(self) -> List[str]:
         """非 Top 艺术家列表（按当前 Top 数量惰性切片）。"""
         with self._lock:
+            self._ensure_default_artists()
             return self.artists[self.top_count :]
 
     def load_artists(self, csv_path: Optional[str] = None, column: str = "trigger") -> List[str]:
@@ -349,11 +365,13 @@ class RollingArtist:
         if artists:
             with self._lock:
                 self.artists = artists
+                self._artists_loaded = True
         return artists
 
     def update_top_pool(self, top_ratio: float) -> int:
         """按比例刷新 Top 艺术家数量，返回该数量。"""
         with self._lock:
+            self._ensure_default_artists()
             self.top_count = compute_top_count(len(self.artists), top_ratio)
             return self.top_count
 
@@ -435,6 +453,7 @@ class RollingArtist:
         top_count = compute_top_count(len(artists), artist_top_ratio)
         with self._lock:
             self.artists, self.top_count = artists, top_count
+            self._artists_loaded = True
 
         prefix = "artist:" if _as_bool(artists_prefix, True) else ""
         dedup = normalize_dedup_mode(dedup_mode)

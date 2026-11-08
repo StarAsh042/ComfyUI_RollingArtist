@@ -3,6 +3,13 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- **RollingCharacter 新增两个高级输入**：`copyright_filter`（英文逗号分隔多个作品名，填写时覆盖「作品」下拉的单选结果）与 `include_copyright`（是否拼上作品标签，默认开启，与旧版一致）。两者都追加在 `INPUT_TYPES` / `generate_characters` 末尾，旧工作流不会串值
+- **去掉两个节点构造期的默认 CSV 预热**：角色节点构造期不再读表；画师节点改为兼容接口首次访问时惰性加载。使用自定义 CSV 时省掉一次默认表的冷加载，生成结果不变
+
 ## [5.3.1] - 2026-11-08
 
 **清理版本**：删除已无调用方的死代码与失效注释，无运行时行为变化、无节点契约变化、无数据库格式变化。

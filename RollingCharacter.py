@@ -38,7 +38,6 @@ from .ra_core.characters import (
     build_payload,
     copyright_options,
     load_index,
-    load_records,
 )
 from .ra_core.constants import (
     DEFAULT_CHARACTER_CSV,
@@ -148,8 +147,8 @@ class RollingCharacter:
         作品 → 输出内容 → 高级（CSV 与数据库路径）」归类；
         很少改动的 CSV / 路径标记为 ``advanced``，由前端折叠到“高级输入”。
 
-        角色节点不做权重分配、不做穷举；输出格式固定为 ``角色标签,作品标签,core_tags``，
-        只提供「开启角色描述」这一个内容开关。
+        角色节点不做权重分配、不做穷举；输出格式固定为 ``角色标签,作品标签,core_tags``。
+        新增的「作品筛选（多作品）」与「包含作品标签」追加在高级输入末尾（见 AC-C07）。
         """
         return {
             "required": {
@@ -288,6 +287,23 @@ class RollingCharacter:
                         "表很大且只想用前一部分时可设为正整数以降低读取耗时与内存",
                     },
                 ),
+                # ---------------- 高级：多作品筛选与输出开关（追加在最后，见 AC-C07） ----------------
+                "copyright_filter": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "advanced": True,
+                        "tooltip": "作品筛选（可多填）：英文逗号分隔多个作品名，如 vocaloid,touhou；忽略大小写，作品名用原始写法或转义写法都能匹配。填写时覆盖上方「作品」下拉的单选结果（不合并），留空则用下拉结果。自定义 CSV 的作品名不会出现在下拉里，请直接填写",
+                    },
+                ),
+                "include_copyright": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "advanced": True,
+                        "tooltip": "是否在每行里拼上作品标签；关闭后只输出「角色标签,角色描述」，若同时关闭「开启角色描述」则只剩角色标签。默认开启，与旧版一致",
+                    },
+                ),
             },
         }
 
@@ -303,7 +319,7 @@ class RollingCharacter:
     )
     OUTPUT_TOOLTIPS = (
         "角色列表：每个角色一行，格式为「角色标签,作品标签,角色描述」，不带权重；"
-        "关闭“开启角色描述”后为「角色标签,作品标签」",
+        "关闭“开启角色描述”后为「角色标签,作品标签」，关闭“包含作品标签”后去掉作品标签",
         "结构化结果 JSON（角色 / 作品 / 是否 Top / 热度 / 角色描述）",
         "当前数据库里已记录的角色组合数量（字符串形式，可直接接到文本节点查看）",
     )
@@ -321,18 +337,14 @@ class RollingCharacter:
     def __init__(self) -> None:
         """初始化节点实例：准备角色仓库、状态容器与“最近记录”窗口。
 
-        真正的加载发生在 ``generate_characters`` 中（按文件签名缓存），
-        这里只做一次默认 CSV 的预热，且任何异常都不会影响节点注册。
+        构造期不读取任何 CSV：角色记录在 ``generate_characters`` 中按需加载
+        （按文件签名缓存），自定义 CSV 场景因此省掉一次默认表的冷加载。
         """
         self._repo = get_repository(DEFAULT_CHARACTER_CSV)
         self._lock = threading.RLock()
         self.characters: List[CharacterRecord] = []
         # 最近若干条输出记录（每条 = 一次生成的角色名），用于回避重复
         self._recent: Deque[Tuple[str, ...]] = deque(maxlen=_RECENT_RECORDS)
-        try:
-            self.characters = load_records(self._repo, "", "trigger")
-        except Exception as error:  # pragma: no cover - 初始化必须保持健壮
-            LOGGER.error("[RollingCharacter] 初始化加载默认角色 CSV 失败: %s", error)
 
     # ------------------------------------------------------------------
     # 最近记录窗口
@@ -372,6 +384,8 @@ class RollingCharacter:
         custom_csv_path: str = "",
         tested_db_path: str = "",
         csv_max_rows: int = 0,
+        copyright_filter: str = "",
+        include_copyright: bool = True,
     ) -> Tuple[str, str, str]:
         """生成角色列表。
 
@@ -380,7 +394,10 @@ class RollingCharacter:
 
         参数:
             csv_max_rows: CSV 读取上限（条记录，含表头；``0`` = 不限制）。
-                新增参数**追加在形参表末尾**，因此按位置调用的外部脚本不受影响。
+            copyright_filter: 逗号分隔的多作品筛选串；非空时覆盖 ``copyright_pick``。
+            include_copyright: 是否在每行拼上作品标签（默认 True，与旧版一致）。
+
+        新增参数**追加在形参表末尾**，因此按位置调用的外部脚本不受影响。
 
         不重复的规则很简单：把最近 :data:`_RECENT_RECORDS` 条输出记录里出现过的角色名
         从候选里排除；只有当窗口把候选全部吃掉时才退回「允许重复」并输出 WARNING。
@@ -415,25 +432,33 @@ class RollingCharacter:
         with self._lock:
             self.characters = records
 
-        # 2) 作品筛选（下拉单选，“(不限)”表示不筛选）+ 名单
+        # 2) 作品筛选（下拉单选 + 高级多作品覆盖，“(不限)”表示不筛选）+ 名单
         force_list = split_names(force_include)
         exclude_set = set(split_names(exclude_characters))
         pick = _text(copyright_pick).strip()
-        copyright_filter = None if pick == COPYRIGHT_ANY else pick
-        allowed = index.indices_for(copyright_filter)
+        filter_text = _text(copyright_filter).strip()
+        # 非空多作品串覆盖下拉单选、不合并；空串回退下拉（"(不限)" = 不筛选）
+        filter_key = filter_text or (None if pick in ("", COPYRIGHT_ANY) else pick)
+        allowed = index.indices_for(filter_key)
         if not allowed and not force_list:
             raise ValueError(
-                "[RollingCharacter] " + _copyright_pick_reject_reason(pick, index, custom_csv_path)
+                "[RollingCharacter] "
+                + _copyright_pick_reject_reason(
+                    filter_text or ("" if pick == COPYRIGHT_ANY else pick) or COPYRIGHT_ANY,
+                    index,
+                    custom_csv_path,
+                )
             )
 
         # 名字唯一（默认数据 34,416 行实测无重名），因此可以按名字直接取回记录
         record_map = index.record_map
-        names = index.names_for(copyright_filter)
+        names = index.names_for(filter_key)
         top_count = compute_top_count(len(names), character_top_ratio)
 
         rng_seed = _as_int(seed, 0)
         top_priority = top_count if _as_bool(use_top_priority, True) else 0
         with_core = _as_bool(describe_character, True)
+        with_copyright = _as_bool(include_copyright, True)
 
         # 3) 回避最近 _RECENT_RECORDS 条输出记录里出现过的角色
         #    分两步走：先算"排除名单后还剩哪些候选"，再决定是否启用回避窗口。
@@ -485,7 +510,7 @@ class RollingCharacter:
             selected_records = [
                 record_map.get(name) or CharacterRecord(name, "", "", "", 0) for name in selected
             ]
-            prompt = build_character_prompt(selected_records, with_core)
+            prompt = build_character_prompt(selected_records, with_core, with_copyright)
 
             # 记录里的权重列统一用等长的 1.0 占位（角色不带权重）
             if not db.record(selected, _key_weights(len(selected)), prompt, KIND_CHARACTER):

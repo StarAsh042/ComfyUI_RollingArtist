@@ -142,12 +142,20 @@
       "csv_max_rows": {
         "name": "CSV Read Limit",
         "tooltip": "Maximum number of CSV records to read (includes the header row; 0 = unlimited). Records beyond the limit are not loaded, so the candidate pool, copyright menu and popularity pool shrink accordingly; the default 0 keeps the full read identical to older versions. Set a positive value when the table is large and only the first part is needed, to cut read time and memory."
+      },
+      "copyright_filter": {
+        "name": "Copyright Filter (multi)",
+        "tooltip": "Copyright filter (multiple works): comma-separated names, e.g. vocaloid,touhou. Case-insensitive; both raw and escaped spellings match. When set, it overrides the single-choice Work dropdown (not merged); leave empty to use the dropdown. Copyrights from a custom CSV never appear in the dropdown - type them directly."
+      },
+      "include_copyright": {
+        "name": "Include Copyright Tag",
+        "tooltip": "Whether to append the work tag to each line. When off, only 'character tag, character description' is output; with Enable Character Description also off, only the character tag remains. On by default, unchanged from older versions."
       }
     },
     "outputs": {
       "0": {
         "name": "Character List",
-        "tooltip": "One line per character in the form \"character tag, copyright tag, character description\", with no weights. With \"Enable Character Description\" turned off it becomes \"character tag, copyright tag\". Multiple characters are separated by a comma plus a newline (each line ends with a comma)."
+        "tooltip": "One line per character in the form \"character tag, copyright tag, character description\", with no weights. With \"Enable Character Description\" turned off it becomes \"character tag, copyright tag\". Multiple characters are separated by a comma plus a newline (each line ends with a comma). With \"Include Copyright Tag\" off, the work tag is dropped."
       },
       "1": {
         "name": "Characters JSON",
