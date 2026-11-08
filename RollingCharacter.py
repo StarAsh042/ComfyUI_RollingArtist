@@ -38,7 +38,6 @@ from .ra_core.characters import (
     build_payload,
     copyright_options,
     load_index,
-    load_records,
 )
 from .ra_core.constants import (
     DEFAULT_CHARACTER_CSV,
@@ -338,18 +337,14 @@ class RollingCharacter:
     def __init__(self) -> None:
         """初始化节点实例：准备角色仓库、状态容器与“最近记录”窗口。
 
-        真正的加载发生在 ``generate_characters`` 中（按文件签名缓存），
-        这里只做一次默认 CSV 的预热，且任何异常都不会影响节点注册。
+        构造期不读取任何 CSV：角色记录在 ``generate_characters`` 中按需加载
+        （按文件签名缓存），自定义 CSV 场景因此省掉一次默认表的冷加载。
         """
         self._repo = get_repository(DEFAULT_CHARACTER_CSV)
         self._lock = threading.RLock()
         self.characters: List[CharacterRecord] = []
         # 最近若干条输出记录（每条 = 一次生成的角色名），用于回避重复
         self._recent: Deque[Tuple[str, ...]] = deque(maxlen=_RECENT_RECORDS)
-        try:
-            self.characters = load_records(self._repo, "", "trigger")
-        except Exception as error:  # pragma: no cover - 初始化必须保持健壮
-            LOGGER.error("[RollingCharacter] 初始化加载默认角色 CSV 失败: %s", error)
 
     # ------------------------------------------------------------------
     # 最近记录窗口
