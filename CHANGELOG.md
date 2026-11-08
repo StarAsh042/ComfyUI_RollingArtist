@@ -3,7 +3,7 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [5.3.1] - 2026-11-08
 
 **清理版本**：删除已无调用方的死代码与失效注释，无运行时行为变化、无节点契约变化、无数据库格式变化。
 
