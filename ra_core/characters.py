@@ -256,7 +256,11 @@ def unique_tags(tags: Iterable[str]) -> List[str]:
     return merged
 
 
-def build_character_prompt(records: Sequence[CharacterRecord], include_core_tags: bool = True) -> str:
+def build_character_prompt(
+    records: Sequence[CharacterRecord],
+    include_core_tags: bool = True,
+    include_copyright: bool = True,
+) -> str:
     """组装角色输出：**每个角色一行**，格式为 ``角色标签,作品标签,core_tags``。
 
     - 不带权重：角色标签直接输出，不套 ``(名称:权重)``
@@ -264,16 +268,18 @@ def build_character_prompt(records: Sequence[CharacterRecord], include_core_tags
       名字列不是 ``trigger`` 时退回 ``copyright`` 列原值，并只转义其中的括号
       （该列不含空格与连字符，无需做下划线替换）
     - 外观标签取自 ``core_tags``，行内去重（源数据里存在同一角色重复列同一标签的情况）；
-      ``include_core_tags=False`` 时每行只输出 ``角色标签,作品标签``
+      ``include_core_tags=False`` 时每行只输出 ``角色标签,作品标签``；
+      ``include_copyright=False`` 时再去掉作品标签（默认开启，与旧版一致）
     - 空的部分自动省略，不会留下多余逗号（没有作品或外观标签时就只有角色标签）
     - 多个角色用「逗号 + 换行」分隔：每一行末尾都补一个逗号（最后一行不补），
       这样把多行拼成一行时标签之间不会粘在一起；单个角色时不带尾逗号
     """
     lines: List[str] = []
     for record in records:
-        copyright_tag = record.extra_tags or escape_parens(record.copyright)
         parts = [record.name]
-        parts.extend(split_tags(copyright_tag))
+        if include_copyright:
+            copyright_tag = record.extra_tags or escape_parens(record.copyright)
+            parts.extend(split_tags(copyright_tag))
         if include_core_tags:
             parts.extend(unique_tags(split_core_tags(record.core_tags)))
         line = ",".join(part for part in parts if part)

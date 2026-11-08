@@ -149,7 +149,7 @@ class RollingCharacter:
         很少改动的 CSV / 路径标记为 ``advanced``，由前端折叠到“高级输入”。
 
         角色节点不做权重分配、不做穷举；输出格式固定为 ``角色标签,作品标签,core_tags``。
-        新增的「作品筛选（多作品）」追加在高级输入末尾（见 AC-C07）。
+        新增的「作品筛选（多作品）」与「包含作品标签」追加在高级输入末尾（见 AC-C07）。
         """
         return {
             "required": {
@@ -288,13 +288,21 @@ class RollingCharacter:
                         "表很大且只想用前一部分时可设为正整数以降低读取耗时与内存",
                     },
                 ),
-                # ---------------- 高级：多作品筛选（追加在最后，见 AC-C07） ----------------
+                # ---------------- 高级：多作品筛选与输出开关（追加在最后，见 AC-C07） ----------------
                 "copyright_filter": (
                     "STRING",
                     {
                         "default": "",
                         "advanced": True,
                         "tooltip": "作品筛选（可多填）：英文逗号分隔多个作品名，如 vocaloid,touhou；忽略大小写，作品名用原始写法或转义写法都能匹配。填写时覆盖上方「作品」下拉的单选结果（不合并），留空则用下拉结果。自定义 CSV 的作品名不会出现在下拉里，请直接填写",
+                    },
+                ),
+                "include_copyright": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "advanced": True,
+                        "tooltip": "是否在每行里拼上作品标签；关闭后只输出「角色标签,角色描述」，若同时关闭「开启角色描述」则只剩角色标签。默认开启，与旧版一致",
                     },
                 ),
             },
@@ -312,7 +320,7 @@ class RollingCharacter:
     )
     OUTPUT_TOOLTIPS = (
         "角色列表：每个角色一行，格式为「角色标签,作品标签,角色描述」，不带权重；"
-        "关闭“开启角色描述”后为「角色标签,作品标签」",
+        "关闭“开启角色描述”后为「角色标签,作品标签」，关闭“包含作品标签”后去掉作品标签",
         "结构化结果 JSON（角色 / 作品 / 是否 Top / 热度 / 角色描述）",
         "当前数据库里已记录的角色组合数量（字符串形式，可直接接到文本节点查看）",
     )
@@ -382,6 +390,7 @@ class RollingCharacter:
         tested_db_path: str = "",
         csv_max_rows: int = 0,
         copyright_filter: str = "",
+        include_copyright: bool = True,
     ) -> Tuple[str, str, str]:
         """生成角色列表。
 
@@ -391,7 +400,9 @@ class RollingCharacter:
         参数:
             csv_max_rows: CSV 读取上限（条记录，含表头；``0`` = 不限制）。
             copyright_filter: 逗号分隔的多作品筛选串；非空时覆盖 ``copyright_pick``。
-                新增参数**追加在形参表末尾**，因此按位置调用的外部脚本不受影响。
+            include_copyright: 是否在每行拼上作品标签（默认 True，与旧版一致）。
+
+        新增参数**追加在形参表末尾**，因此按位置调用的外部脚本不受影响。
 
         不重复的规则很简单：把最近 :data:`_RECENT_RECORDS` 条输出记录里出现过的角色名
         从候选里排除；只有当窗口把候选全部吃掉时才退回「允许重复」并输出 WARNING。
@@ -452,6 +463,7 @@ class RollingCharacter:
         rng_seed = _as_int(seed, 0)
         top_priority = top_count if _as_bool(use_top_priority, True) else 0
         with_core = _as_bool(describe_character, True)
+        with_copyright = _as_bool(include_copyright, True)
 
         # 3) 回避最近 _RECENT_RECORDS 条输出记录里出现过的角色
         #    分两步走：先算"排除名单后还剩哪些候选"，再决定是否启用回避窗口。
@@ -503,7 +515,7 @@ class RollingCharacter:
             selected_records = [
                 record_map.get(name) or CharacterRecord(name, "", "", "", 0) for name in selected
             ]
-            prompt = build_character_prompt(selected_records, with_core)
+            prompt = build_character_prompt(selected_records, with_core, with_copyright)
 
             # 记录里的权重列统一用等长的 1.0 占位（角色不带权重）
             if not db.record(selected, _key_weights(len(selected)), prompt, KIND_CHARACTER):

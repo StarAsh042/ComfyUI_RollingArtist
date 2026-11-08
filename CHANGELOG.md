@@ -7,7 +7,7 @@
 
 ### 新增
 
-- **RollingCharacter 新增高级输入 `copyright_filter`（作品筛选，可多填）**：英文逗号分隔多个作品名（如 `vocaloid,touhou`），填写时覆盖「作品」下拉的单选结果（不合并），留空仍用下拉；自定义 CSV 的作品名不会出现在下拉里，可直接填写
+- **RollingCharacter 新增两个高级输入**：`copyright_filter`（英文逗号分隔多个作品名，填写时覆盖「作品」下拉的单选结果）与 `include_copyright`（是否拼上作品标签，默认开启，与旧版一致）。两者都追加在 `INPUT_TYPES` / `generate_characters` 末尾，旧工作流不会串值
 
 ## [5.3.1] - 2026-11-08
 
