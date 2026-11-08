@@ -27,6 +27,7 @@ from .ra_core.artists import (
     available_names,
     compute_top_count,
     get_repository,
+    plan_blocked,
     select_artists,
     split_names,
 )
@@ -464,21 +465,28 @@ class RollingCharacter:
         #    分两步走：先算"排除名单后还剩哪些候选"，再决定是否启用回避窗口。
         #    这样"窗口把候选吃光时退回允许重复"的降级是显式的，而不是事后修正一个
         #    已经拼好的屏蔽集。
+        #
+        #    判空走 plan_blocked 的单次扫描：它直接给出「可用数量」与「抽样要跳过的
+        #    下标」，而改造前这里把候选、存活者各展开成一个 list——3.4 万行数据下
+        #    每轮白扫两遍，只为判断「是不是 0」。
         recent = self.recent_names()
-        candidates = available_names(names, exclude_set)
         blocked = exclude_set
+        window_indices: Optional[Sequence[int]] = None
         if recent:
-            survivors = available_names(candidates, recent)
+            blocked_indices, survivors = plan_blocked(names, exclude_set | recent, force_list)
             if survivors:
                 blocked = exclude_set | recent
-            elif candidates and not force_list:
-                # 候选本来就少、且已被窗口全部覆盖：退回允许重复，并明确告警
-                LOGGER.warning(
-                    "[RollingCharacter] 最近 %d 条输出记录已覆盖全部 %d 个候选角色，"
-                    "本轮不再回避重复（可用角色太少时属于正常现象）",
-                    _RECENT_RECORDS,
-                    len(candidates),
-                )
+                window_indices = blocked_indices
+            elif not force_list:
+                candidates = available_names(names, exclude_set)
+                if candidates:
+                    # 候选本来就少、且已被窗口全部覆盖：退回允许重复，并明确告警
+                    LOGGER.warning(
+                        "[RollingCharacter] 最近 %d 条输出记录已覆盖全部 %d 个候选角色，"
+                        "本轮不再回避重复（可用角色太少时属于正常现象）",
+                        _RECENT_RECORDS,
+                        len(candidates),
+                    )
 
         # 4) 记录库：角色专用 SQLite（记录带 kind 标记，与画师互不干扰）
         db = get_db(tested_db_path, DEFAULT_CHARACTER_DB)
@@ -494,6 +502,7 @@ class RollingCharacter:
                 names,
                 top_priority,
                 blocked,
+                window_indices,
             )
             if not selected:
                 raise ValueError(

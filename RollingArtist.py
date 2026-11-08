@@ -17,6 +17,7 @@ from .ra_core.artists import (
     ArtistRepository,
     compute_top_count,
     get_artist_repository,
+    plan_blocked,
     select_artists,
     split_names,
 )
@@ -444,10 +445,12 @@ class RollingArtist:
             )
 
         # 2) 参数规范化（兼容 API 直接传入 None / 字符串的情况）
+        #    屏蔽下标只扫一遍全表：下面的重试循环每轮都要用同一份，
+        #    逐轮重建等于把整份 CSV 扫 attempts 遍（默认 10 遍）。
         exclude_set = set(split_names(exclude_artists))
         force_list = split_names(force_include)
-        candidates = artists if not exclude_set else [name for name in artists if name not in exclude_set]
-        if not candidates and not force_list:
+        blocked_indices, available = plan_blocked(artists, exclude_set, force_list)
+        if not available and not force_list:
             raise ValueError("[RollingArtist] exclude_artists 排除了全部艺术家，无可用艺术家")
 
         top_count = compute_top_count(len(artists), artist_top_ratio)
@@ -483,6 +486,7 @@ class RollingArtist:
                     artists,
                     top_count if _as_bool(use_top_priority, True) else 0,
                     exclude_set,
+                    blocked_indices,
                 )
                 if not selected:
                     continue

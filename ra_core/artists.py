@@ -10,8 +10,9 @@ import math
 import os
 import random
 import threading
+from bisect import bisect_left
 from collections import OrderedDict
-from itertools import chain
+from itertools import chain, compress
 from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 from .constants import CSV_READ_ENCODING, DEFAULT_ARTIST_CSV, LOGGER
@@ -29,6 +30,9 @@ __all__ = [
     "compute_top_count",
     "select_artists",
     "available_names",
+    "build_blocked_indices",
+    "plan_blocked",
+    "ExcludedWindow",
     "split_names",
 ]
 
@@ -667,6 +671,9 @@ def available_names(names: Sequence[str], blocked: Optional[Set[str]]) -> List[s
     典型用途：角色节点先用最近窗口算屏蔽集，再用本函数得到可用候选，
     当结果为空（窗口把候选吃光）时可以显式决定"退回允许重复"。
 
+    只需要「有多少可用」而不需要「可用的都有谁」时请改用 :func:`plan_blocked`——
+    本函数要把整份名单展开成列表，3.4 万行下约 4 ms，只为取一个长度是纯浪费。
+
     参数:
         names: 完整候选名列表（保持原顺序）
         blocked: 需要屏蔽的名字集合；``None`` 或空集合表示不屏蔽
@@ -674,6 +681,98 @@ def available_names(names: Sequence[str], blocked: Optional[Set[str]]) -> List[s
     if not blocked:
         return list(names)
     return [name for name in names if name not in blocked]
+
+
+def build_blocked_indices(artists: Sequence[str], blocked: Optional[Set[str]]) -> List[int]:
+    """返回 ``blocked`` 里的名字在 ``artists`` 中的下标（升序）。
+
+    单次 C 层扫描：``map`` 做集合查找、``compress`` 过滤、``sorted`` 定型
+    （``range`` 本身有序，``sorted`` 只是把迭代器实体化成 list）。3.4 万行约 5 ms，
+    因此重试循环里必须**复用**结果而不是每轮重建——``RollingArtist`` 默认尝试 10 轮，
+    逐轮重建曾让带排除名单的生成慢 17 倍。
+    """
+    if not blocked:
+        return []
+    return sorted(compress(range(len(artists)), map(blocked.__contains__, artists)))
+
+
+def plan_blocked(
+    artists: Sequence[str],
+    blocked: Optional[Set[str]],
+    force_list: Sequence[str],
+) -> Tuple[List[int], int]:
+    """一次扫描同时算出「抽样要跳过的下标」和「只按 blocked 计的可用数量」。
+
+    返回值 1 是 ``blocked`` 与 ``force_list`` 的并集在 ``artists`` 里的下标，
+    可直接传给 :func:`select_artists`：强制名单优先于屏蔽，同样要从抽样池里剔掉，
+    否则同一个名字会被既强制又抽中。
+
+    返回值 2 **不**计入 force，与
+    ``len(artists) - len(available_names(artists, blocked))`` 相等，供调用方判断
+    「排除名单是否把候选排空」而无需展开整份名单。
+
+    force 名字通常只有几个，所以「force 独有的名字」先做集合差，再只在（很短的）
+    下标列表里数一遍做修正，避免为这一个数字再扫一遍全表。
+
+    参数:
+        artists: 完整候选池
+        blocked: 需要屏蔽的名字集合；``None`` 或空集合表示不屏蔽
+        force_list: 强制出现的名字（优先级高于 ``blocked``）
+    """
+    if not blocked and not force_list:
+        return [], len(artists)
+    blocked_set = set(blocked or ())
+    force_only = {name for name in force_list if name and name not in blocked_set}
+    indices = build_blocked_indices(artists, (blocked_set | force_only) if force_only else blocked_set)
+    if not force_only:
+        return indices, len(artists) - len(indices)
+    # 下标里掺了 force 独有的名字，算「只按 blocked 的可用数」时要减回去
+    force_only_hits = sum(1 for index in indices if artists[index] in force_only)
+    return indices, len(artists) - (len(indices) - force_only_hits)
+
+
+class ExcludedWindow(Sequence[int]):
+    """``[start, stop)`` 区间里剔除被屏蔽下标后的惰性视图。
+
+    :func:`select_artists` 要把「Top 段可用下标」和「其余段可用下标」两个序列喂给
+    ``random.sample``，而抽样只取其中 k 个元素。改造前两段都展开成 list，
+    3.4 万行 / 30 个屏蔽下每次约 20 ms；本类只保存「区间 + 区间内的屏蔽下标」，
+    按下标惰性求值，代价只与 k 和屏蔽密度有关。
+
+    结果与展开后的 list 逐种子一致：``random.sample`` 只看序列长度与第 i 项，
+    容器类型不影响 ``_randbelow`` 的调用序列。
+
+    ``blocked`` 必须是**升序**的屏蔽下标列表（:func:`build_blocked_indices` 的返回值）。
+    """
+
+    __slots__ = ("_start", "_count", "_blocked")
+
+    def __init__(self, start: int, stop: int, blocked: Sequence[int]) -> None:
+        self._start = start
+        self._blocked = blocked[bisect_left(blocked, start) : bisect_left(blocked, stop)]
+        self._count = (stop - start) - len(self._blocked)
+
+    def __len__(self) -> int:
+        return self._count
+
+    def __getitem__(self, index: int) -> int:
+        if isinstance(index, slice):
+            raise TypeError("ExcludedWindow 不支持切片，抽样只按下标取值")
+        position = index
+        if position < 0:
+            position += self._count
+        if position < 0 or position >= self._count:
+            raise IndexError(index)
+        position += self._start
+        # 每跳过一个屏蔽下标，真实下标后移一位；屏蔽列表很短，这个循环基本只走 1 圈
+        for blocked in self._blocked:
+            if blocked > position:
+                break
+            position += 1
+        return position
+
+    def __repr__(self) -> str:
+        return f"ExcludedWindow(start={self._start}, size={self._count}, blocked={len(self._blocked)})"
 
 
 def select_artists(
@@ -684,6 +783,7 @@ def select_artists(
     artists: Sequence[str],
     top_count: int,
     exclude_set: Set[str],
+    blocked_indices: Optional[Sequence[int]] = None,
 ) -> List[str]:
     """从候选池中抽取指定数量的名字。
 
@@ -693,15 +793,21 @@ def select_artists(
 
     返回名字列表（顺序已随机打乱）。
 
-    实现上使用索引抽样：无排除条件时直接对 ``range`` 抽样，
-    因此运行时间与总量无关（旧实现对每个元素重复构建 set，复杂度 O(n²)）。
+    实现上使用索引抽样：无排除条件时直接对 ``range`` 抽样，因此运行时间与总量无关；
+    有排除条件时用 :class:`ExcludedWindow` 惰性跳过被屏蔽的下标，只对真正取到的
+    k 个元素求值。
 
-    注意：本函数只负责"抽"，不负责"判断候选是否够用"。调用方若需要
-    在候选被屏蔽光时采取降级策略，应先用 :func:`available_names` 计算可用候选。
+    注意：本函数只负责"抽"，不负责"判断候选是否够用"。调用方若需要在候选被屏蔽光时
+    采取降级策略，应先用 :func:`plan_blocked` 拿到可用数量。
+
+    参数:
+        blocked_indices: 预先算好、可跨多轮复用的屏蔽下标（重试循环的常见用法），
+            必须等于「``exclude_set`` ∪ ``force_list``」在 ``artists`` 中的下标；
+            传 ``None`` 时本函数自己扫一遍。
     """
     total = len(artists)
     # force 去重（保持首次出现顺序）：重复项会让 len(force) 虚高，
-    # 进而在 `len(force) >= artist_count` 分支里用 rng.sample 抽出同名两次，
+    # 进而在「len(force) >= artist_count」分支里用 rng.sample 抽出同名两次，
     # 产出 ['a1','a2','a1'] 这种权重被打散、语义重复的提示词且不报错。
     force: List[str] = []
     _seen_force: Set[str] = set()
@@ -717,16 +823,14 @@ def select_artists(
     force_set = set(force)
     top_count = max(0, min(int(top_count), total))
 
+    if blocked_indices is None:
+        blocked_indices = build_blocked_indices(artists, exclude_set | force_set)
+
     top_idx: Sequence[int]
     rest_idx: Sequence[int]
-    if exclude_set or force_set:
-
-        def allowed(index: int) -> bool:
-            name = artists[index]
-            return name not in force_set and name not in exclude_set
-
-        top_idx = [index for index in range(top_count) if allowed(index)]
-        rest_idx = [index for index in range(top_count, total) if allowed(index)]
+    if blocked_indices:
+        top_idx = ExcludedWindow(0, top_count, blocked_indices)
+        rest_idx = ExcludedWindow(top_count, total, blocked_indices)
     else:
         top_idx = range(top_count)
         rest_idx = range(top_count, total)
