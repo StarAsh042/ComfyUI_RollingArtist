@@ -45,11 +45,10 @@ _STATUS_OK = "OK"
 
 
 # 参数容错转换与 RollingCharacter 共用一份实现（见 ra_core/params.py）
-_as_text = as_text
 _as_int = as_int
 _as_float = as_float
 _as_bool = as_bool
-_text = _as_text
+_text = as_text
 
 
 class RollingArtist:
@@ -77,7 +76,7 @@ class RollingArtist:
         """定义节点的输入参数类型和界面显示。
 
         界面顺序即下方字典顺序，按“抽样 → Top 池 → 权重 → 前缀/种子 → 抽样偏好 → 名单 →
-        去重 → 高级（CSV 数据源、数据库与旧记录路径）”归类；很少改动的 CSV / 路径标记为
+        去重 → 高级（CSV 数据源、数据库与读取上限）”归类；很少改动的 CSV / 路径标记为
         ``advanced``，由前端折叠到“高级输入”。
 
         关于重排的兼容性：当前前端保存工作流时同时写 ``widgets_values_named``（按名字）与

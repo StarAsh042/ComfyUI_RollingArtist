@@ -199,7 +199,7 @@ def parse_artist_rows(
                 列索引（``"0"``）或表头列名（``"artist"``）
         max_rows: 最多消费的记录条数（``None`` = 不限制）。
 
-    **计数基准（D-04 = 方案 A）**：``max_rows`` 数的是「``csv.reader`` 产出的记录」，
+    **计数基准**：``max_rows`` 数的是「``csv.reader`` 产出的记录」，
     **含表头行、含空记录**。这是 v5.2.0 统一后的唯一定义，``load_rows`` 路径也按
     同一基准计数（见 :meth:`ArtistRepository._iter_csv_rows`）。
 
@@ -389,7 +389,7 @@ class ArtistRepository:
     ) -> Tuple[List[str], Optional[Tuple[str, int, int]]]:
         """加载艺术家列表，返回 ``(artists, stat_key)``。
 
-        **有效上限进缓存键**（AC-C05）：键从 ``(路径, 列, mtime, size)`` 扩成
+        **有效上限进缓存键**：键从 ``(路径, 列, mtime, size)`` 扩成
         ``(路径, 列, mtime, size, limit)``，改上限必然重建，不会命中旧结果。
         """
         path = self.resolve_path(custom_path)
@@ -427,7 +427,7 @@ class ArtistRepository:
                 结束后统一作废，才能保持「任一读错误则空结果」的既有语义。
             max_rows: 最多消费的**原始记录**条数（``None`` = 不限制）。
 
-        **计数基准（D-04 = 方案 A）**：计的是 ``csv.reader`` 产出的每一条记录，
+        **计数基准**：计的是 ``csv.reader`` 产出的每一条记录，
         **含空记录**（空记录会被跳过不产出，但**计入**上限）。这是两条读取路径的
         唯一计数实现——``_csv_rows`` 也委托到这里，因此 ``load`` 与 ``load_rows``
         对同一 CSV 同一 N 消费的记录数必然一致。
@@ -455,7 +455,7 @@ class ArtistRepository:
                     if limit is not None and consumed >= limit:
                         # 走到这里说明「第 limit+1 条」已经被产出了 —— 它正是判断
                         # 「是否真有余量」所需的证据，**零额外读盘**。文件恰好 N 条时
-                        # 循环会自然结束、走不到这里，因此 exact-N 不会误报截断（AC-C04）。
+                        # 循环会自然结束、走不到这里，因此 exact-N 不会误报截断。
                         if state is not None:
                             state["truncated"] = True
                         return
@@ -478,12 +478,12 @@ class ArtistRepository:
         """流式打开 CSV，返回 ``(行迭代器, 失败标记, stat_key)``。
 
         供需要多列数据的调用方（RollingCharacter 要同时用 trigger / copyright /
-        core_tags / count）使用，**不写 ``_rows_cache``** —— 这是 AC-C06 的要求：
-        角色正常加载不应常驻一份原始行列表。
+        core_tags / count）使用，**不写 ``_rows_cache``**：角色正常加载不应常驻
+        一份原始行列表。
 
         与 :meth:`load_rows` 的关系：``load_rows`` 是保留的兼容入口（返回 List 并缓存），
         本方法是新增的流式入口，两者读同一份文件、同一套路径解析与体积告警，
-        并按同一基准（D-04：含表头、含空记录）应用 ``max_rows``。
+        并按同一基准（含表头、含空记录）应用 ``max_rows``。
 
         调用方必须：① 消费完迭代器后检查失败标记，为真则整份作废；
         ② 在不再消费时 ``close()`` 迭代器，避免文件句柄悬空。
@@ -500,7 +500,7 @@ class ArtistRepository:
         异常兜底全部收敛到流式实现里，两条路径不再各写一份逻辑——这正是
         v5.2.0 之前「同一文件同一 N 两条路径返回不同条数」的根因。
 
-        保留它是因为 ``load_rows`` 需要返回 ``List``（公开兼容入口，AC-C06 要求）。
+        保留它是因为 ``load_rows`` 需要返回 ``List``（保留的兼容入口）。
         """
         state: Dict[str, bool] = {"failed": False}
         rows = list(self._iter_csv_rows(path, state, max_rows))
@@ -561,7 +561,7 @@ class ArtistRepository:
         （例如 RollingCharacter 要同时用 trigger / copyright / core_tags / count）。
         行内保持原始顺序，表头行也在其中，由调用方自行判断。
 
-        **有效上限进缓存键**（AC-C05）：键从 ``stat_key`` 扩成 ``stat_key + (limit,)``。
+        **有效上限进缓存键**：键从 ``stat_key`` 扩成 ``stat_key + (limit,)``。
         改造前键只有文件签名，改上限会命中旧缓存——实测「上限 3→6」时 5 层缓存
         全部 stale，而 ``_rows_cache`` 命中还会掩盖下层 records/index 的失效。
         """
@@ -577,7 +577,7 @@ class ArtistRepository:
     def _read_rows(self, path: str, max_rows: Optional[int] = None) -> List[List[str]]:
         """读整份 CSV 为行列表；超过有效上限时**读满即停**并告警。
 
-        **exact-N 不谎称截断**（AC-C04）：只有「确实还有记录未被消费」时才告警。
+        **exact-N 不谎称截断**：只有「确实还有记录未被消费」时才告警。
         改造前用 ``len(rows) >= CSV_MAX_ROWS`` 判断，恰好 N 条的文件也报「已截断」，
         是误报。现在由流式实现在碰到第 limit+1 条时置位，**不额外读盘**。
         """

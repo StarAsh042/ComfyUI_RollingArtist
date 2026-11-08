@@ -7,7 +7,7 @@
 - ``characters``: 角色数据解析（trigger 拆解）、作品筛选、外观标签合并
 - ``weights``:    权重分配、提示词构建解析、去重键
 - ``db``:         SQLite 记录库（已测记录）
-- ``storage``:    旧版 CSV 读取与备份（供导入与留底使用）
+- ``storage``:    文件指纹与旧版 CSV 记录行解析（供 IS_CHANGED 与旧记录导入使用）
 - ``startup``:    启动期清理默认运行期文件（由 prestartup_script.py 调用）
 """
 
@@ -49,7 +49,6 @@ from .constants import (
     DEFAULT_TESTED_CSV,
     KIND_ARTIST,
     KIND_CHARACTER,
-    LEGACY_BACKUP_SUFFIX,
     LOGGER,
     NODE_DIR,
     WEIGHT_STEP,
@@ -64,7 +63,7 @@ from .paths import (
     forbidden_roots,
 )
 from .startup import cleanup_default_runtime_files, default_runtime_files
-from .storage import backup_file, file_fingerprint, parse_tested_row, read_rows
+from .storage import file_fingerprint, parse_tested_row
 from .weights import (
     DEDUP_MODES,
     WEIGHT_CURVES,
@@ -114,7 +113,6 @@ __all__ = [
     "DEFAULT_TESTED_CSV",
     "KIND_ARTIST",
     "KIND_CHARACTER",
-    "LEGACY_BACKUP_SUFFIX",
     "LOGGER",
     "NODE_DIR",
     "WEIGHT_STEP",
@@ -136,10 +134,8 @@ __all__ = [
     "check_db_path",
     "check_path",
     "forbidden_roots",
-    "backup_file",
     "file_fingerprint",
     "parse_tested_row",
-    "read_rows",
     # weights
     "DEDUP_MODES",
     "WEIGHT_CURVES",
