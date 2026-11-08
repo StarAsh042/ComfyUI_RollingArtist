@@ -3,6 +3,12 @@
 本文件记录 RollingArtist 的重要变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- **RollingCharacter 新增高级输入 `copyright_filter`（作品筛选，可多填）**：英文逗号分隔多个作品名（如 `vocaloid,touhou`），填写时覆盖「作品」下拉的单选结果（不合并），留空仍用下拉；自定义 CSV 的作品名不会出现在下拉里，可直接填写
+
 ## [5.3.1] - 2026-11-08
 
 **清理版本**：删除已无调用方的死代码与失效注释，无运行时行为变化、无节点契约变化、无数据库格式变化。

@@ -148,8 +148,8 @@ class RollingCharacter:
         作品 → 输出内容 → 高级（CSV 与数据库路径）」归类；
         很少改动的 CSV / 路径标记为 ``advanced``，由前端折叠到“高级输入”。
 
-        角色节点不做权重分配、不做穷举；输出格式固定为 ``角色标签,作品标签,core_tags``，
-        只提供「开启角色描述」这一个内容开关。
+        角色节点不做权重分配、不做穷举；输出格式固定为 ``角色标签,作品标签,core_tags``。
+        新增的「作品筛选（多作品）」追加在高级输入末尾（见 AC-C07）。
         """
         return {
             "required": {
@@ -288,6 +288,15 @@ class RollingCharacter:
                         "表很大且只想用前一部分时可设为正整数以降低读取耗时与内存",
                     },
                 ),
+                # ---------------- 高级：多作品筛选（追加在最后，见 AC-C07） ----------------
+                "copyright_filter": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "advanced": True,
+                        "tooltip": "作品筛选（可多填）：英文逗号分隔多个作品名，如 vocaloid,touhou；忽略大小写，作品名用原始写法或转义写法都能匹配。填写时覆盖上方「作品」下拉的单选结果（不合并），留空则用下拉结果。自定义 CSV 的作品名不会出现在下拉里，请直接填写",
+                    },
+                ),
             },
         }
 
@@ -372,6 +381,7 @@ class RollingCharacter:
         custom_csv_path: str = "",
         tested_db_path: str = "",
         csv_max_rows: int = 0,
+        copyright_filter: str = "",
     ) -> Tuple[str, str, str]:
         """生成角色列表。
 
@@ -380,6 +390,7 @@ class RollingCharacter:
 
         参数:
             csv_max_rows: CSV 读取上限（条记录，含表头；``0`` = 不限制）。
+            copyright_filter: 逗号分隔的多作品筛选串；非空时覆盖 ``copyright_pick``。
                 新增参数**追加在形参表末尾**，因此按位置调用的外部脚本不受影响。
 
         不重复的规则很简单：把最近 :data:`_RECENT_RECORDS` 条输出记录里出现过的角色名
@@ -415,20 +426,27 @@ class RollingCharacter:
         with self._lock:
             self.characters = records
 
-        # 2) 作品筛选（下拉单选，“(不限)”表示不筛选）+ 名单
+        # 2) 作品筛选（下拉单选 + 高级多作品覆盖，“(不限)”表示不筛选）+ 名单
         force_list = split_names(force_include)
         exclude_set = set(split_names(exclude_characters))
         pick = _text(copyright_pick).strip()
-        copyright_filter = None if pick == COPYRIGHT_ANY else pick
-        allowed = index.indices_for(copyright_filter)
+        filter_text = _text(copyright_filter).strip()
+        # 非空多作品串覆盖下拉单选、不合并；空串回退下拉（"(不限)" = 不筛选）
+        filter_key = filter_text or (None if pick in ("", COPYRIGHT_ANY) else pick)
+        allowed = index.indices_for(filter_key)
         if not allowed and not force_list:
             raise ValueError(
-                "[RollingCharacter] " + _copyright_pick_reject_reason(pick, index, custom_csv_path)
+                "[RollingCharacter] "
+                + _copyright_pick_reject_reason(
+                    filter_text or ("" if pick == COPYRIGHT_ANY else pick) or COPYRIGHT_ANY,
+                    index,
+                    custom_csv_path,
+                )
             )
 
         # 名字唯一（默认数据 34,416 行实测无重名），因此可以按名字直接取回记录
         record_map = index.record_map
-        names = index.names_for(copyright_filter)
+        names = index.names_for(filter_key)
         top_count = compute_top_count(len(names), character_top_ratio)
 
         rng_seed = _as_int(seed, 0)
