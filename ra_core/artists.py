@@ -13,7 +13,7 @@ import threading
 from bisect import bisect_left
 from collections import OrderedDict
 from itertools import chain, compress
-from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple, overload
 
 from .constants import CSV_READ_ENCODING, DEFAULT_ARTIST_CSV, LOGGER
 from .paths import check_csv_path
@@ -755,9 +755,15 @@ class ExcludedWindow(Sequence[int]):
     def __len__(self) -> int:
         return self._count
 
-    def __getitem__(self, index: int) -> int:
+    @overload
+    def __getitem__(self, index: int) -> int: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> List[int]: ...
+
+    def __getitem__(self, index):
         if isinstance(index, slice):
-            raise TypeError("ExcludedWindow 不支持切片，抽样只按下标取值")
+            return [self[position] for position in range(*index.indices(self._count))]
         position = index
         if position < 0:
             position += self._count
